@@ -15,14 +15,23 @@ import type { SurfaceDescriptor, SurfaceShowResult } from '@dogic/core/surface'
 import type { WorkspaceApi, WorkspaceContext, WorkspaceRootChanged } from '@dogic/plugin-workspace'
 import type { TerminalApi, TerminalDescriptor, TerminalEvent, TerminalShowResult } from '@dogic/plugin-terminal'
 import type { ProcessExecuteAck, ProcessProfile, ProcessRequest, ProcessResult } from '@dogic/plugin-terminal'
-import type {
-  BrowserApi,
-  BrowserNavigateRequest,
-  BrowserNavigateResult,
-  BrowserOpenResult,
-  BrowserSessionState,
-  BrowserSurfaceEvent,
-} from '@dogic/plugin-browser'
+import type { BrowserApi } from '@dogic/plugin-browser'
+import { createBrowserApi } from '@dogic/plugin-browser/ipc'
+
+/**
+ * browser 窄通道（W5.3/W6/W6.6）：按插件 IPC 契约构造——通道名与参数签名
+ * 来自契约，preload 只提供 Electron 的传输实现。
+ * renderer 只提交安全字段（会话 id + 规范化 URL / 条数上限 / 清单引用）；
+ * 无 webContents/session 对象、无页面脚本执行通道。
+ */
+const browserApi: BrowserApi = createBrowserApi({
+  invoke: (channel, id, payload) => ipcRenderer.invoke(channel, id, payload),
+  subscribe: (channel, listener) => {
+    const handler = (_e: unknown, payload: unknown): void => listener(payload)
+    ipcRenderer.on(channel, handler)
+    return () => ipcRenderer.removeListener(channel, handler)
+  },
+})
 
 const api = {
   getStatus: (): Promise<StatusSnapshot> => ipcRenderer.invoke('innate:status'),
@@ -116,25 +125,8 @@ const api = {
     ipcRenderer.invoke('innate:processResult', executionId),
   processCancel: (executionId: string): Promise<boolean> =>
     ipcRenderer.invoke('innate:processCancel', executionId),
-  // browser 地址栏窄通道（W5.3）：只提交安全字段（会话 id + 规范化 URL），
-  // 页面事件由主进程推送；无 webContents/session 对象、无页面脚本执行通道。
-  browserNavigate: (id: string, request: BrowserNavigateRequest): Promise<BrowserNavigateResult> =>
-    ipcRenderer.invoke('innate:browserNavigate', id, request),
-  browserBack: (id: string): Promise<BrowserNavigateResult> =>
-    ipcRenderer.invoke('innate:browserBack', id),
-  browserForward: (id: string): Promise<BrowserNavigateResult> =>
-    ipcRenderer.invoke('innate:browserForward', id),
-  browserReload: (id: string): Promise<BrowserNavigateResult> =>
-    ipcRenderer.invoke('innate:browserReload', id),
-  browserStop: (id: string): Promise<BrowserOpenResult> =>
-    ipcRenderer.invoke('innate:browserStop', id),
-  browserState: (id: string): Promise<BrowserSessionState | null> =>
-    ipcRenderer.invoke('innate:browserState', id),
-  browserOnEvent: (cb: (event: BrowserSurfaceEvent) => void): (() => void) => {
-    const listener = (_e: unknown, event: BrowserSurfaceEvent): void => cb(event)
-    ipcRenderer.on('innate:browser-event', listener)
-    return () => ipcRenderer.removeListener('innate:browser-event', listener)
-  },
+  // browser 窄通道（W5.3/W6/W6.6）：契约构造，preload 只提供传输实现。
+  ...browserApi,
 } satisfies WorkspaceApi & TerminalApi & BrowserApi & Record<string, unknown>
 
 contextBridge.exposeInMainWorld('innate', api)

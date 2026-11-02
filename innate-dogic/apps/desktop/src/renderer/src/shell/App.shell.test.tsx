@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ConsoleStatusEvent, GatewayStatusEvent } from '@dogic/core'
 
@@ -36,9 +36,51 @@ const apiMocks = vi.hoisted(() => ({
   revealDshHome: vi.fn(async () => ''),
   // W3：root 变更订阅（关闭旧 root 文档标签）
   workspaceOnRootChanged: vi.fn(() => () => {}),
+  // W6.8：主页展示并使用当前工作区 root
+  workspaceGetRoot: vi.fn(async (): Promise<{ path: string; name: string } | null> => null),
+  workspacePickRoot: vi.fn(async (): Promise<{ path: string; name: string } | null> => null),
+  // 主页快捷入口落到真实 Surface：browser/terminal 的窄通道桩
+  browserNavigate: vi.fn(async () => ({ ok: true, url: 'https://example.com/' })),
+  browserBack: vi.fn(async () => ({ ok: true, url: 'https://example.com/' })),
+  browserForward: vi.fn(async () => ({ ok: true, url: 'https://example.com/' })),
+  browserReload: vi.fn(async () => ({ ok: true, url: 'https://example.com/' })),
+  browserStop: vi.fn(async () => ({ ok: true })),
+  browserState: vi.fn(async () => null),
+  browserOnEvent: vi.fn(() => () => {}),
+  browserExtractList: vi.fn(async () => ({ ok: true, elements: [] })),
+  browserExtractDetail: vi.fn(async () => ({ ok: true })),
+  terminalCreate: vi.fn(async () => ({ ok: true })),
+  terminalClose: vi.fn(async () => true),
+  terminalInput: vi.fn(async () => true),
+  terminalResize: vi.fn(async () => true),
+  terminalOnEvent: vi.fn(() => () => {}),
 }))
 
 vi.mock('../api', () => ({ api: apiMocks }))
+
+// 终端面板在 jsdom 里需要 xterm 桩（真实 xterm 依赖 canvas/DOM 测量）。
+vi.mock('@xterm/xterm', () => ({
+  Terminal: class {
+    element: HTMLElement | undefined
+    options: Record<string, unknown> = {}
+    write = vi.fn()
+    open = vi.fn((element: HTMLElement): void => {
+      this.element = document.createElement('div')
+      element.appendChild(this.element)
+    })
+    onData = vi.fn((): { dispose(): void } => ({ dispose: vi.fn() }))
+    getSelection = vi.fn((): string => '')
+    clear = vi.fn()
+    dispose = vi.fn()
+    loadAddon = vi.fn()
+  },
+}))
+vi.mock('@xterm/addon-fit', () => ({
+  FitAddon: class {
+    fit = vi.fn()
+    proposeDimensions = vi.fn((): { cols: number; rows: number } => ({ cols: 80, rows: 24 }))
+  },
+}))
 vi.mock('../plugin-registry', async () => {
   const React = await import('react')
   return {
@@ -56,6 +98,12 @@ import App from '../App'
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+})
+
+// 工作区 root 桩默认「未选择」：用例需要时各自覆盖（clearAllMocks 不清实现）。
+beforeEach(() => {
+  apiMocks.workspaceGetRoot.mockResolvedValue(null)
+  apiMocks.workspacePickRoot.mockResolvedValue(null)
 })
 
 describe('W1b App 壳组合（T2/T3）', () => {
@@ -117,5 +165,34 @@ describe('W1b App 壳组合（T2/T3）', () => {
     fireEvent.click(screen.getByTitle('工具'))
     await waitFor(() => expect(screen.getByRole('heading', { name: '工具' })).toBeTruthy())
     expect(container.querySelector('.content')).not.toBeNull()
+  })
+
+  it('W6.8：主页（总览）给出「打开终端/打开浏览器」入口', async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getByTitle('总览')).toBeTruthy())
+    expect(screen.getByRole('button', { name: '打开终端' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '打开浏览器' })).toBeTruthy()
+  })
+
+  it('W6.8：主页点「打开浏览器」建浏览器标签并切到浏览器页', async () => {
+    const { container } = render(<App />)
+    await waitFor(() => expect(screen.getByTitle('总览')).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('button', { name: '打开浏览器' }))
+
+    await waitFor(() => expect(screen.getByRole('tab', { name: '浏览器 1' })).toBeTruthy())
+    expect((container.querySelector('.nav-item.current') as HTMLElement | null)?.title).toBe('浏览器')
+  })
+
+  it('W6.8：主页点「打开终端」用当前工作区建终端标签并切到终端页', async () => {
+    apiMocks.workspaceGetRoot.mockResolvedValue({ path: 'C:/repo', name: 'repo' })
+    const { container } = render(<App />)
+    await waitFor(() => expect(screen.getByTitle('总览')).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('button', { name: '打开终端' }))
+
+    await waitFor(() => expect(screen.getByRole('tab', { name: '终端 1' })).toBeTruthy())
+    expect((container.querySelector('.nav-item.current') as HTMLElement | null)?.title).toBe('终端')
+    expect(apiMocks.terminalCreate).toHaveBeenCalledTimes(1)
   })
 })

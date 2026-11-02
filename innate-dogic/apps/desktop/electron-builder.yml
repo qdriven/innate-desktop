@@ -8,6 +8,11 @@ files:
   - out/**
   - package.json
   - "!**/*.map"
+# node-pty beta42 自带预编译二进制（prebuilds/win32-x64，运行时优先 build/Release
+# 回落 prebuilds/，dev 即走此路径且 Electron 43 ABI 与本机 Node 24 一致）。
+# 跳过 @electron/rebuild：源码重编译要求 VS Spectre 缓解库（MSB8040），
+# 本机 BuildTools 无该组件，且产物与预编译等价。
+npmRebuild: false
 extraResources:
   # M2 simple 模式 overlay，运行时经 process.resourcesPath 读取
   - from: resources/innate-simple.patch.yml

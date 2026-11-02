@@ -10,9 +10,17 @@
       "types": "./dist/shared/index.d.ts",
       "import": "./dist/shared/index.js"
     },
+    "./ipc": {
+      "types": "./dist/shared/ipc.d.ts",
+      "import": "./dist/shared/ipc.js"
+    },
     "./main": {
       "types": "./dist/main/index.d.ts",
       "import": "./dist/main/index.js"
+    },
+    "./main/ipc": {
+      "types": "./dist/main/ipc.d.ts",
+      "import": "./dist/main/ipc.js"
     },
     "./main/electron": {
       "types": "./dist/main/electron-view.d.ts",

@@ -36,6 +36,7 @@ export default function ShellSidebar({
   return (
     <aside className="sidebar">
       <SidebarProvider
+        className="sidebar-chrome"
         style={{ '--sidebar-width': '40px', '--sidebar-width-icon': '40px' } as React.CSSProperties}
       >
         <Sidebar className="w-full border-none bg-transparent">

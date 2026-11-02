@@ -349,8 +349,9 @@ try {
       const r = button.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]
     })
   }))()`)
+  // W6.7：窗口控件收小到 32×28（用户要求「按钮变小、黑色变浅」）。
   if (!titlebar?.tabs || !titlebar.statusEmpty || !titlebar.rightPanelSlot || !titlebar.noPill ||
-      titlebar.controlSizes.length !== 3 || titlebar.controlSizes.some(([w, h]) => w !== 46 || h !== 36)) {
+      titlebar.controlSizes.length !== 3 || titlebar.controlSizes.some(([w, h]) => w !== 32 || h !== 28)) {
     throw new Error(`TitlebarStrip 三区/空槽/窗口控件尺寸不符合契约: ${JSON.stringify(titlebar)}`)
   }
   await evaluate('document.querySelector(\'[aria-label="最大化"]\')?.click()')
@@ -386,78 +387,16 @@ try {
   await evaluate("localStorage.setItem('color-mode', 'light'); window.dispatchEvent(new Event('innate-theme-storage'))")
   console.log('[smoke] ThemeProvider .dark、语义 token 与 Geist 明暗证据已保存')
 
+  // W6.9：magpie 控制台集成已摘除——模型配置页为占位说明，不再创建原生视图
+  // （控制台 WebContentsView 曾盖住渲染层吞掉真实点击，是「点击没反应」根因）。
   await evaluate('[...document.querySelectorAll(\'.nav-item\')].find(b=>b.textContent.includes(\'模型配置\'))?.click()')
-  const consoleTarget = async (): Promise<CdpTarget | undefined> => (await targets()).find((target) =>
-    target.type === 'page' && target.url.startsWith('http://127.0.0.1:'))
-  for (let i = 0; i < 60; i++) {
-    await sleep(5_000)
-    const view = await consoleTarget()
-    console.log(`[smoke] t+${(i + 1) * 5}s view target:`, view ? `${view.url} | ${view.title}` : '(none)')
-    if (view?.title) break
-  }
-  const viewTarget = await consoleTarget()
-  if (!viewTarget) {
-    const fallback = await evaluate("document.querySelector('.surface-error')?.textContent")
-    throw new Error(`未找到受管 magpie 控制台 target；页面状态: ${String(fallback ?? '无错误说明')}`)
-  }
-  const viewSocket = new WebSocket(viewTarget.webSocketDebuggerUrl)
-  await new Promise<void>((resolve) => { viewSocket.onopen = () => resolve() })
-  const readViewBody = async (): Promise<string> => {
-    const evalId = ++seq
-    const value = await new Promise<unknown>((resolve) => {
-      viewSocket.onmessage = (event) => {
-        const message = JSON.parse(String(event.data)) as CdpMessage
-        if (message.id === evalId) resolve((message.result as EvaluateResult | undefined)?.result?.value)
-      }
-      viewSocket.send(JSON.stringify({
-        id: evalId,
-        method: 'Runtime.evaluate',
-        params: { expression: "document.title + ' || ' + (document.body?.innerText ?? '').slice(0, 1000)", returnByValue: true },
-      }))
-    })
-    return typeof value === 'string' ? value : ''
-  }
-  // 控制台是 SPA：target 出现不等于导航已渲染，轮询到真实导航出现为止。
-  let bodyText = ''
-  for (let i = 0; i < 90; i++) {
-    bodyText = await readViewBody()
-    console.log(`[smoke] console view content t+${i * 3}s:`, bodyText.slice(0, 120))
-    if (/this link's key is not|unauthorized|HTTP 401/i.test(bodyText)) break
-    if (/Agents|Providers|Sessions|Library|Settings|Usage|供应商|资源库|设置|用量/i.test(bodyText)) break
-    await sleep(3_000)
-  }
-  console.log('[smoke] console view content:', bodyText.slice(0, 200))
-  if (/this link's key is not|unauthorized|HTTP 401/i.test(bodyText)) throw new Error('magpie 控制台认证失败')
-  if (!/Agents|Providers|Sessions|Library|Settings|Usage|供应商|资源库|设置|用量/i.test(bodyText)) {
-    throw new Error('magpie 控制台实际导航未加载')
-  }
-  const viewShotId = ++seq
-  const viewShot = await new Promise<{ data?: string }>((resolve) => {
-    viewSocket.onmessage = (event) => {
-      const message = JSON.parse(String(event.data)) as CdpMessage
-      if (message.id === viewShotId) resolve(message.result as { data?: string })
-    }
-    viewSocket.send(JSON.stringify({ id: viewShotId, method: 'Page.captureScreenshot', params: { format: 'png' } }))
-  })
-  if (!viewShot.data) throw new Error('magpie 控制台截图失败')
-  writeFileSync(path.join(outDir, 'console-view.png'), Buffer.from(viewShot.data, 'base64'))
-  console.log('[smoke] saved console-view.png')
-  viewSocket.close()
-  await shot('console')
-  await saveElementBounds('.surface-view-area', 'console-bounds')
-  const consoleFallback = await evaluate("document.querySelector('.surface-error')?.textContent")
-  if (consoleFallback) throw new Error(`magpie 控制台壳层回退: ${String(consoleFallback)}`)
-  console.log('[smoke] 受管 magpie 控制台认证与真实内容通过')
-
-  // W1c：控制台进入统一中栏槽，标签条只认安全 descriptor
-  const tabStrip = await evaluate<{ tabs: string[]; current: string }>(`(() => ({
-    tabs: [...document.querySelectorAll('.surface-tab [role="tab"]')].map((b) => b.textContent ?? ''),
-    current: document.querySelector('.surface-tab.current [role="tab"]')?.textContent ?? '',
-  }))()`)
-  if (!tabStrip?.tabs.includes('magpie 控制台')) {
-    throw new Error(`中栏 Surface 标签缺失: ${JSON.stringify(tabStrip)}`)
-  }
-  console.log('[smoke] 统一中栏标签条:', tabStrip.tabs.join(' | '), '当前:', tabStrip.current)
+  await sleep(1_000)
+  const consolePlaceholder = await evaluate<string>("document.querySelector('.console-page')?.textContent ?? ''")
+  if (!consolePlaceholder.includes('未集成')) throw new Error(`控制台页占位缺失: ${consolePlaceholder.slice(0, 120)}`)
+  const magpieViewTarget = (await targets()).find((target) => target.type === 'page' && target.url.startsWith('http://127.0.0.1:'))
+  if (magpieViewTarget) throw new Error(`不应存在 magpie 控制台原生视图: ${magpieViewTarget.url}`)
+  await shot('console-placeholder')
+  console.log('[smoke] magpie 控制台集成已摘除（占位页、无原生视图）通过')
 
   // W1c 安全负路径：伪造 providerId 与未运行的 Harness 都必须被主进程拒绝
   const forged = await evaluate<{ ok: boolean; detail?: string }>(
@@ -470,20 +409,12 @@ try {
   if (harnessBeforeLaunch?.ok) throw new Error('Harness 未运行时不应打开 Surface')
   console.log('[smoke] 伪造 providerId / 未就绪 provider 均被拒绝，壳仍可用')
 
-  // W1a 基线：hide/show 后必须复用同一控制台 target（重建会换端口 → URL 必变）
-  const consoleUrlBefore = viewTarget.url
-  await evaluate("window.innate.surfaceHide('magpie-console')")
-  await sleep(1_000)
-  await evaluate("window.innate.surfaceShow({ id: 'magpie-console', providerId: 'magpie-console', kind: 'webcontents', title: 'magpie 控制台' }, { x: 8, y: 64, width: 900, height: 600 })")
-  await sleep(2_000)
-  const viewTarget2 = await consoleTarget()
-  if (!viewTarget2 || viewTarget2.url !== consoleUrlBefore) {
-    throw new Error(`控制台 hide/show 后 target 重建或 URL 变化: ${viewTarget2?.url ?? '(none)'}`)
-  }
-  await shotTarget(viewTarget2, 'console-view-reshow')
-  console.log('[smoke] 控制台 hide/show 复用同一 target（URL 未变）通过')
-  const dom = await evaluate<string>("document.querySelector('.app')?.outerHTML")
-  writeFileSync(path.join(outDir, 'console.dom.html'), dom ?? '')
+  // W6.9 回归：已摘除的 magpie-console provider 必须被主进程拒绝（原生视图不得复活）
+  const magpieSurface = await evaluate<{ ok: boolean; detail?: string }>(
+    "window.innate.surfaceShow({ id: 'magpie-console', providerId: 'magpie-console', kind: 'webcontents', title: 'magpie 控制台' }, { x: 0, y: 0, width: 10, height: 10 })",
+  )
+  if (magpieSurface?.ok) throw new Error('已摘除的 magpie-console provider 未被拒绝')
+  console.log('[smoke] magpie-console provider 已摘除并被主进程拒绝')
 
   await evaluate("window.innate.setMode('simple')")
   await evaluate('location.reload()')
@@ -555,48 +486,30 @@ try {
   const rightPanelReady = await evaluate<boolean>("Boolean(document.querySelector('.right-panel'))")
   if (!rightPanelReady) throw new Error('dev 右栏工作区面板未渲染')
 
-  // W1c：Harness 与控制台共用同一中栏槽——交替切换不重载，关闭一个不影响另一个
+  // W1c：Harness 跨页面导航存活（detach 不销毁；W6.9 起中栏只有 Harness/终端/浏览器/文档）
   if (harnessPort !== undefined) {
-    const consoleUrl = consoleUrlBefore
     await evaluate('[...document.querySelectorAll(\'.nav-item\')].find(b=>b.getAttribute(\'title\')===\'模型配置\')?.click()')
-    await sleep(3_000)
-    const bothTabs = await evaluate<string[]>("[...document.querySelectorAll('.surface-tab [role=\"tab\"]')].map(b=>b.textContent ?? '')") ?? []
-    console.log('[smoke] 多 Surface 标签:', bothTabs.join(' | '))
-    if (!bothTabs.includes('DeepSeek Harness') || !bothTabs.includes('magpie 控制台')) {
-      throw new Error(`统一中栏槽未同时承载 Harness 与控制台: ${JSON.stringify(bothTabs)}`)
-    }
+    await sleep(2_000)
+    const harnessDuringNav = (await targets()).find((target) => target.url.includes(`:${harnessPort}/`))
+    if (!harnessDuringNav) throw new Error('导航到控制台页后 Harness target 消失')
+    if (harnessDuringNav.url !== harnessUrlBefore) throw new Error(`Harness URL 变化: ${harnessDuringNav.url}`)
     await shot('surface-tabs')
 
-    // 切到 Harness 标签：URL 不变、存活标记仍在（= 未 reload）
-    await evaluate("[...document.querySelectorAll('.surface-tab [role=\"tab\"]')].find(b=>b.textContent?.includes('DeepSeek Harness'))?.click()")
+    // 回到对话页重新附着：URL 不变、存活标记仍在（= 未 reload）
+    await evaluate('[...document.querySelectorAll(\'.nav-item\')].find(b=>b.getAttribute(\'title\')===\'对话\')?.click()')
     await sleep(2_000)
     const harnessAfterSwitch = (await targets()).find((target) => target.url.includes(`:${harnessPort}/`))
-    if (!harnessAfterSwitch) throw new Error('切换标签后 Harness target 消失')
-    if (harnessAfterSwitch.url !== harnessUrlBefore) throw new Error(`切换标签后 Harness URL 变化: ${harnessAfterSwitch.url}`)
+    if (!harnessAfterSwitch) throw new Error('切换页面后 Harness target 消失')
+    if (harnessAfterSwitch.url !== harnessUrlBefore) throw new Error(`切换页面后 Harness URL 变化: ${harnessAfterSwitch.url}`)
     const markerAfterSwitch = await evalTarget<number>(harnessAfterSwitch, 'Number(window.__w1aMarker ?? 0)')
-    if (!markerAfterSwitch) throw new Error('切换标签后 Harness 被 reload（存活标记丢失）')
-
-    // 切回控制台标签：控制台 target 复用，URL 不变
-    await evaluate("[...document.querySelectorAll('.surface-tab [role=\"tab\"]')].find(b=>b.textContent?.includes('magpie 控制台'))?.click()")
-    await sleep(2_000)
-    const consoleAfterSwitch = (await targets()).find((target) => target.type === 'page' && target.url === consoleUrl)
-    if (!consoleAfterSwitch) throw new Error(`切换标签后控制台 target 消失或重建: ${consoleUrl ?? '(none)'}`)
+    if (!markerAfterSwitch) throw new Error('切换页面后 Harness 被 reload（存活标记丢失）')
     await shot('surface-tabs-switched')
+    console.log('[smoke] Harness 跨页面导航存活（URL 未变、未 reload）通过')
 
-    // 关闭控制台标签：只销毁控制台视图，Harness 仍存活
-    await evaluate("document.querySelector('[aria-label=\"关闭 magpie 控制台\"]')?.click()")
-    await sleep(2_000)
-    const consoleAfterClose = (await targets()).find((target) => target.type === 'page' && target.url === consoleUrl)
-    if (consoleAfterClose) throw new Error('关闭控制台标签后其视图仍存活')
-    const harnessAfterClose = (await targets()).find((target) => target.url.includes(`:${harnessPort}/`))
-    if (!harnessAfterClose) throw new Error('关闭控制台标签后 Harness 消失（违反关闭隔离）')
-    const tabsAfterClose = await evaluate<string[]>("[...document.querySelectorAll('.surface-tab [role=\"tab\"]')].map(b=>b.textContent ?? '')") ?? []
-    if (tabsAfterClose.includes('magpie 控制台')) throw new Error(`关闭后控制台标签仍在: ${JSON.stringify(tabsAfterClose)}`)
-    console.log('[smoke] 多 Surface 交替切换不重载、关闭一个不影响另一个通过')
-
-    // W1c 安全：renderer 状态与标签快照都不含认证 URL / token
+    // W1c 安全：renderer 状态与标签快照都不含认证 URL / token；快照不含已摘除的 magpie-console
     const harnessStateJson = await evaluate<string>('window.innate.getHarnessState().then((s) => JSON.stringify(s))') ?? ''
     const tabsSnapshot = await evaluate<string>("localStorage.getItem('innate.surface-tabs:center') ?? ''") ?? ''
+    if (tabsSnapshot.includes('magpie-console')) throw new Error('快照仍含已摘除的 magpie-console 标签')
     for (const [name, value] of [['harness state', harnessStateJson], ['surface snapshot', tabsSnapshot]] as const) {
       if (/token=|[?&]k=|api[-_]?key/i.test(value)) throw new Error(`${name} 含认证信息: ${value.slice(0, 200)}`)
       if (/https?:\/\/127\.0\.0\.1:\d+\/\?/.test(value)) throw new Error(`${name} 含认证 URL: ${value.slice(0, 200)}`)
@@ -757,7 +670,7 @@ try {
 
   // W4.7 安全：伪造 capability 的 Surface descriptor 必须被解析层拒绝
   const forgedCapability = await evaluate<{ ok: boolean; detail?: string }>(
-    "window.innate.surfaceShow({ id: 'magpie-console', providerId: 'magpie-console', kind: 'webcontents', title: '伪造能力', capabilities: ['shell:exec'] }, { x: 0, y: 0, width: 10, height: 10 })",
+    "window.innate.surfaceShow({ id: 'browser-1', providerId: 'browser', kind: 'webcontents', title: '伪造能力', capabilities: ['shell:exec'] }, { x: 0, y: 0, width: 10, height: 10 })",
   )
   if (forgedCapability?.ok) throw new Error('伪造 capability 未被拒绝')
   if (!forgedCapability?.detail?.includes('capability')) {

@@ -23,7 +23,9 @@ import { WorkspaceService } from '@dogic/plugin-workspace/main'
 import { TerminalService } from '@dogic/plugin-terminal/main'
 import { BrowserSurfaceService } from '@dogic/plugin-browser/main'
 import { createElectronBrowserView } from '@dogic/plugin-browser/main/electron'
+import { BROWSER_IPC_EVENT_CHANNEL } from '@dogic/plugin-browser/ipc'
 import { HarnessRuntime } from './harness'
+import { registerDesktopBrowserIpc } from './browser-ipc'
 import { SurfaceHost } from './surface-host'
 import { ensureMagpieConsole, getConsole, getGateway, startMagpie } from './launcher'
 
@@ -64,7 +66,7 @@ export function registerIpc(mainWindow: BrowserWindow): void {
   const browser = new BrowserSurfaceService({
     factory: (descriptor, guard) => createElectronBrowserView(descriptor, guard, { parentWindow: mainWindow }),
     onEvent: (event) => {
-      if (!mainWindow.isDestroyed()) mainWindow.webContents.send('innate:browser-event', event)
+      if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_IPC_EVENT_CHANNEL, event)
     },
   })
   mainWindow.on('closed', () => {
@@ -80,6 +82,9 @@ export function registerIpc(mainWindow: BrowserWindow): void {
   })()
 
   // 认证 URL 只在对应 runtime provider 内解析；renderer 只提交安全 descriptor。
+  // W6.9：magpie 控制台 surface 已摘除——其原生 WebContentsView 曾在快照恢复
+  // /控制台页路径下自动挂载，盖住渲染层吞掉全部真实点击（「点击没反应」根因）。
+  // 网关状态 pill、启动/打开控制台按钮（外部浏览器）保留。
   surfaces.registerProvider({
     id: 'harness',
     kind: 'webcontents',
@@ -89,15 +94,6 @@ export function registerIpc(mainWindow: BrowserWindow): void {
         return { ok: false, detail: 'Harness 尚未运行，请先启动对话' }
       }
       return { ok: true, url: state.url }
-    },
-  })
-  surfaces.registerProvider({
-    id: 'magpie-console',
-    kind: 'webcontents',
-    resolve: async () => {
-      const ready = await ensureMagpieConsole()
-      if (!ready.ok || !ready.url) return { ok: false, detail: ready.detail }
-      return { ok: true, url: ready.url }
     },
   })
   surfaces.registerProvider(browser.provider)
@@ -155,13 +151,9 @@ export function registerIpc(mainWindow: BrowserWindow): void {
   ipcMain.handle('innate:surfaceBounds', (_e, id: unknown, bounds: unknown) => surfaces.setBounds(id, bounds))
   ipcMain.handle('innate:surfaceClose', (_e, id: unknown) => surfaces.close(id))
 
-  // browser 导航窄通道（W5.2）：renderer 只提交安全字段，URL 一律经服务层白名单。
-  ipcMain.handle('innate:browserNavigate', (_e, id: unknown, request: unknown) => browser.navigate(id, request))
-  ipcMain.handle('innate:browserBack', (_e, id: unknown) => browser.back(id))
-  ipcMain.handle('innate:browserForward', (_e, id: unknown) => browser.forward(id))
-  ipcMain.handle('innate:browserReload', (_e, id: unknown) => browser.reload(id))
-  ipcMain.handle('innate:browserStop', (_e, id: unknown) => browser.stop(id))
-  ipcMain.handle('innate:browserState', (_e, id: unknown) => browser.state(id) ?? null)
+  // browser 窄通道（W5.2/W6.6）：按插件 IPC 契约注册——通道名、方法签名与
+  // 能力声明全部来自契约，桌面只声明自己实现的契约版本；版本不兼容即 fail closed。
+  registerDesktopBrowserIpc(browser)
 
   ipcMain.handle('innate:revealDshHome', () => shell.openPath(dshHome()))
   ipcMain.handle('innate:openLogs', () => shell.openPath(path.join(app.getPath('userData'), 'logs')))

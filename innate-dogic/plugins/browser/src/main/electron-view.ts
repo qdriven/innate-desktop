@@ -29,6 +29,7 @@ import type {
   BrowserViewEvent,
 } from './index.js'
 import { browserPermissionOrigin, denyBrowserPermission } from './permission.js'
+import { createElectronExtractionPort } from './extraction-cdp.js'
 import {
   mapDownloadItemState,
   normalizeDownloadPercent,
@@ -236,6 +237,8 @@ export function createElectronBrowserView(
     stop: () => webContents.stop(),
     close: () => webContents.close(),
     setBounds: (bounds) => view.setBounds(bounds),
+    // W6：元素提取端口（CDP 只读域；不执行页面脚本）。
+    extraction: createElectronExtractionPort(webContents),
     subscribe: (listener) => {
       listeners.add(listener)
       return () => listeners.delete(listener)

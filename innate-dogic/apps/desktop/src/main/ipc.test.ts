@@ -90,6 +90,14 @@ const browser = vi.hoisted(() => {
         calls.push({ method: 'state', args: [id] })
         return undefined
       }
+      async extractList(id: unknown, request: unknown) {
+        calls.push({ method: 'extractList', args: [id, request] })
+        return { ok: true, elements: [] }
+      }
+      async extractDetail(id: unknown, request: unknown) {
+        calls.push({ method: 'extractDetail', args: [id, request] })
+        return { ok: false, detail: '提取详情引用无效或已过期，请重新列出元素' }
+      }
       dispose() {}
     },
   }
@@ -149,6 +157,8 @@ vi.mock('./launcher', () => ({
 }))
 
 import { registerIpc } from './ipc'
+import { DESKTOP_BROWSER_IPC_VERSION } from './browser-ipc'
+import { BROWSER_IPC_CHANNELS, BROWSER_IPC_CONTRACT, isBrowserIpcVersionCompatible } from '@dogic/plugin-browser/ipc'
 
 function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
   const handler = ipc.handlers.get(channel)
@@ -236,5 +246,46 @@ describe('W5.2 browser 窄通道（desktop main）', () => {
     expect(browser.calls.some((call) => call.method === 'stop')).toBe(true)
     expect(await invoke('innate:browserState', 'browser-1')).toBeNull()
     expect(browser.calls.some((call) => call.method === 'state')).toBe(true)
+  })
+})
+
+describe('W6.6 browser IPC 契约接线（desktop main）', () => {
+  beforeEach(() => {
+    ipc.handlers.clear()
+    terminal.calls.length = 0
+    browser.calls.length = 0
+    env.mode = 'dev'
+    env.userDataDir = 'C:/fake-user-data'
+  })
+
+  it('桌面声明的契约版本与插件契约兼容', () => {
+    expect(isBrowserIpcVersionCompatible(DESKTOP_BROWSER_IPC_VERSION)).toBe(true)
+  })
+
+  it('契约全部通道在桌面注册（含元素提取），不额外新增通道', () => {
+    registerIpc(new BrowserWindow({}))
+    for (const method of BROWSER_IPC_CONTRACT.methods) {
+      expect(ipc.handlers.has(BROWSER_IPC_CHANNELS[method])).toBe(true)
+    }
+    const browserChannels = [...ipc.handlers.keys()].filter((channel) => channel.startsWith('innate:browser'))
+    expect(browserChannels.sort()).toEqual(
+      Object.values(BROWSER_IPC_CHANNELS).sort(),
+    )
+  })
+
+  it('元素提取经契约通道转发到服务层（renderer 只提交 id 与引用）', async () => {
+    registerIpc(new BrowserWindow({}))
+    expect(await invoke('innate:browserExtractList', 'browser-1', { limit: 20 }))
+      .toEqual({ ok: true, elements: [] })
+    const listCall = browser.calls.find((call) => call.method === 'extractList')
+    expect(listCall?.args).toEqual(['browser-1', { limit: 20 }])
+    expect(await invoke('innate:browserExtractDetail', 'browser-1', { ref: 'el-1' }))
+      .toEqual({ ok: false, detail: '提取详情引用无效或已过期，请重新列出元素' })
+  })
+
+  it('红线：契约通道集合里没有页面脚本执行入口', () => {
+    registerIpc(new BrowserWindow({}))
+    const browserChannels = [...ipc.handlers.keys()].filter((channel) => channel.startsWith('innate:browser'))
+    expect(browserChannels.some((channel) => /execute|eval|script|runtime|cdp/i.test(channel))).toBe(false)
   })
 })

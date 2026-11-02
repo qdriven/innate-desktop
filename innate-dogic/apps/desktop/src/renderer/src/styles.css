@@ -32,11 +32,13 @@ body {
 .app { display: flex; flex-direction: column; height: 100vh; }
 
 /* W1a 顶栏组合；尺寸与窗口控件 chrome 由 packages/theme/src/shell.css 提供。 */
-.titlebar-strip { --window-controls-width: 138px; flex-shrink: 0; }
+.titlebar-strip { --window-controls-width: 96px; flex-shrink: 0; }
 .titlebar-strip .titlebar-left { gap: 6px; padding-left: 10px; }
 .titlebar .logo { color: var(--text); font-size: var(--font-title); }
 .titlebar button { -webkit-app-region: no-drag; }
-.titlebar .window-controls-btn { width: 46px; height: 36px; padding: 0; border-radius: 0; }
+/* 窗口控件（W6.7）：收窄到 32×28——46×36 的按钮在 36px 顶栏里视觉过重，
+ * 与壳内其它控件的尺度也不齐。 */
+.titlebar .window-controls-btn { width: 32px; height: 28px; padding: 0; border-radius: 0; }
 .titlebar-tabs { flex: 1; align-self: stretch; min-width: 0; }
 .titlebar-right { display: flex; align-items: center; height: 100%; min-width: 0; gap: 8px; -webkit-app-region: no-drag; }
 .titlebar-status-slot:empty { width: 0; }
@@ -82,6 +84,12 @@ body {
   background: var(--sidebar); border-right: 1px solid var(--border);
   padding: 6px 0;
 }
+/* W6.9（关键修复）：@innate/ui Sidebar 原语的容器是 fixed inset-y-0 z-10 h-svh——
+   默认铺满整个视口，肉眼透明但 pointer-events:auto，会吞掉中栏与内容区的全部
+   真实鼠标点击（「新建终端/浏览器点了没反应」的最终根因；JS .click() 不受影响，
+   所以此前自动化全部绿灯）。contain: layout 使 fixed 后代的包含块回落到本元素，
+   覆盖面收窄回 40px 侧栏，视觉不变、点击恢复。 */
+.sidebar-chrome { contain: layout; }
 .nav { display: flex; flex-direction: column; gap: 2px; width: 100%; align-items: center; }
 .nav-item {
   display: flex; align-items: center; justify-content: center;
@@ -167,6 +175,17 @@ button.small { padding: 3px 10px; font-size: var(--font-xs); border-radius: 5px;
 .table-head h2 { margin: 0; font-size: var(--font-title); }
 .main h2 { margin: 0 0 12px; font-size: var(--font-title); }
 
+/* W6.8：主页快捷入口（打开终端/浏览器）——一行卡片，右侧是两个浅底动作。 */
+.quick-launch {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 18px; margin-bottom: 12px;
+}
+.quick-launch h2 { margin: 0 0 4px; font-size: var(--font-title); }
+.quick-launch p { margin: 0; font-size: var(--font-xs); }
+.quick-launch-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.quick-launch-actions button { padding: 4px 12px; font-size: var(--font-xs); }
+
 table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 8px; overflow: hidden; }
 th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--border); }
 th { color: var(--dim); font-weight: 500; font-size: var(--font-2xs); text-transform: uppercase; letter-spacing: 0.05em; }
@@ -225,6 +244,15 @@ td .dim { font-size: var(--font-xs); }
 .surface-slot-body { flex: 1; min-height: 0; position: relative; }
 .surface-view { position: absolute; inset: 0; }
 .surface-view-area { position: absolute; inset: 0; }
+/**
+ * browser 的视图区改为流内剩余空间（W6.7）。
+ *
+ * 原生 WebContentsView 永远画在渲染层**之上**——视图区若仍绝对定位铺满
+ * `.surface-view`，原生视图会盖住地址栏、提示行与提取面板：新建的浏览器
+ * 初始是 about:blank（白屏），地址栏又被盖住，看起来就是「点了没反应」。
+ * 改成 flex 流内的剩余空间后，地址栏与面板在上、原生视图在下，各就各位。
+ */
+.browser-surface .surface-view-area { position: relative; inset: auto; flex: 1; min-height: 0; }
 .surface-tabstrip, .workspace-tabstrip {
   min-height: 36px; display: flex; align-items: center; gap: 3px; padding: 4px 7px;
   overflow-x: auto; flex-shrink: 0; background: var(--panel); border-bottom: 1px solid var(--border);
@@ -313,6 +341,37 @@ td .dim { font-size: var(--font-xs); }
   max-width: 40%; flex: 1 1 auto; min-width: 0;
 }
 .browser-download-state { flex-shrink: 0; margin-left: auto; color: var(--dim); }
+
+/* 元素提取（W6）：元素清单 + 元素详情卡片 */
+.browser-elements {
+  flex-shrink: 0; display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 10px;
+  background: var(--panel-2); border-bottom: 1px solid var(--border);
+  max-height: 132px; overflow-y: auto;
+}
+.browser-element {
+  max-width: 220px; padding: 2px 8px; font-size: var(--font-xs); color: var(--text);
+  background: var(--panel); border: 1px solid var(--border); border-radius: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+}
+.browser-element:hover { border-color: var(--accent); }
+.browser-element-detail {
+  flex-shrink: 0; display: flex; gap: 10px; padding: 8px 10px;
+  background: var(--panel-2); border-bottom: 1px solid var(--border);
+  max-height: 220px; overflow-y: auto;
+}
+.browser-element-shot {
+  flex-shrink: 0; max-width: 180px; max-height: 180px; border: 1px solid var(--border);
+  border-radius: 4px; object-fit: contain; background: var(--bg);
+}
+.browser-element-fields {
+  flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+  font-size: var(--font-xs);
+}
+.browser-element-fields > div { display: flex; gap: 8px; min-width: 0; }
+.browser-element-fields b { flex-shrink: 0; min-width: 56px; color: var(--dim); font-weight: 500; }
+.browser-element-fields span {
+  color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 /* 工作区插件：中央文档 + 右侧文件/Git 面板 */
 .workspace-page { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -417,6 +476,16 @@ td .dim { font-size: var(--font-xs); }
   display: flex; align-items: center; gap: 8px; padding: 6px 10px; flex-shrink: 0;
   background: var(--panel); border-bottom: 1px solid var(--border);
 }
+/**
+ * 页级工具栏的主操作（W6.7）：「新建浏览器 / 新建终端」原是近黑实心块，
+ * 视觉过重。改为浅底 + 细边框，尺寸同步收小——主操作靠位置与文案识别，
+ * 不靠大面积填黑。
+ */
+.terminal-toolbar button.primary {
+  padding: 3px 10px; font-size: var(--font-xs); font-weight: 500;
+  background: var(--panel-2); border-color: var(--border); color: var(--text);
+}
+.terminal-toolbar button.primary:hover:not(:disabled) { border-color: var(--accent); filter: none; }
 .terminal-root-label { color: var(--dim); font-size: var(--font-2xs); }
 .terminal-panel { position: relative; height: 100%; min-height: 0; display: flex; flex-direction: column; }
 .terminal-title { font-size: var(--font-xs); color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

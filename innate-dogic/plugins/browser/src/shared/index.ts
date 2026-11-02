@@ -13,6 +13,28 @@
  */
 import { parseSurfaceDescriptor } from '@dogic/core/surface'
 import type { SurfaceCapability } from '@dogic/core/surface'
+import type {
+  BrowserExtractionDetailRequest,
+  BrowserExtractionDetailResult,
+  BrowserExtractionListRequest,
+  BrowserExtractionListResult,
+} from './extraction.js'
+
+// W6：元素提取契约（主进程与 renderer 共用）。
+export type {
+  BrowserElementDetail,
+  BrowserElementRect,
+  BrowserElementSummary,
+  BrowserExtractionDetailRequest,
+  BrowserExtractionDetailResult,
+  BrowserExtractionListRequest,
+  BrowserExtractionListResult,
+  BrowserExtractionPage,
+} from './extraction.js'
+
+// W6.6：browser IPC 契约（版本化、宿主中立）——通道名、方法签名、能力声明。
+// 契约归插件所有：desktop 的任意版本与其他插件都按这份清单接入。
+export * from './ipc.js'
 
 export const BROWSER_PROVIDER_ID = 'browser'
 
@@ -144,6 +166,14 @@ export interface BrowserApi {
   browserStop(id: string): Promise<BrowserOpenResult>
   browserState(id: string): Promise<BrowserSessionState | null>
   browserOnEvent(cb: (event: BrowserSurfaceEvent) => void): () => void
+  /**
+   * W6：列出页面元素（提取元素·清单）。
+   * renderer 只提交会话 id 与条数上限；元素引用由主进程签发，
+   * renderer 不能自造 id，也不能指定 CDP 方法。
+   */
+  browserExtractList(id: string, request?: BrowserExtractionListRequest): Promise<BrowserExtractionListResult>
+  /** W6：取单个元素详情（提取元素·详情）；ref 必须来自上一次清单。 */
+  browserExtractDetail(id: string, request: BrowserExtractionDetailRequest): Promise<BrowserExtractionDetailResult>
 }
 
 const browserIdPattern = /^[A-Za-z0-9_-]{1,64}$/

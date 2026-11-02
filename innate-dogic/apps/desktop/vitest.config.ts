@@ -23,8 +23,10 @@ export default defineConfig({
       '@dogic/plugin-terminal/renderer': path.resolve(here, '../../plugins/terminal/src/renderer/index.ts'),
       '@dogic/plugin-terminal': path.resolve(here, '../../plugins/terminal/src/shared/index.ts'),
       '@dogic/plugin-browser/main/electron': path.resolve(here, '../../plugins/browser/src/main/electron-view.ts'),
+      '@dogic/plugin-browser/main/ipc': path.resolve(here, '../../plugins/browser/src/main/ipc.ts'),
       '@dogic/plugin-browser/main': path.resolve(here, '../../plugins/browser/src/main/index.ts'),
       '@dogic/plugin-browser/renderer': path.resolve(here, '../../plugins/browser/src/renderer/index.ts'),
+      '@dogic/plugin-browser/ipc': path.resolve(here, '../../plugins/browser/src/shared/ipc.ts'),
       '@dogic/plugin-browser': path.resolve(here, '../../plugins/browser/src/shared/index.ts'),
       // xterm 别名：插件源码与测试文件解析到同一模块实例，vi.mock 才能命中。
       '@xterm/xterm': path.resolve(here, '../../plugins/terminal/node_modules/@xterm/xterm'),
