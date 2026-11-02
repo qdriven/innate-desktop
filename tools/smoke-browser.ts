@@ -274,6 +274,15 @@ async function main(): Promise<void> {
   await sleep(2_000)
   const panelReady = await evaluate<boolean>("Boolean(document.querySelector('.browser-surface .browser-address'))")
   record('新建浏览器：地址栏面板挂载', panelReady === true)
+  // W6.7 回归：原生 WebContentsView 画在渲染层之上——视图区必须让出地址栏，
+  // 否则原生视图盖住地址栏，新建的空白浏览器看起来「点了没反应」。
+  const areaBelowToolbar = await evaluate<boolean>(`(() => {
+    const toolbar = document.querySelector('.browser-toolbar')?.getBoundingClientRect()
+    const area = document.querySelector('.surface-view-area')?.getBoundingClientRect()
+    if (!toolbar || !area) return false
+    return area.top >= toolbar.bottom - 1
+  })()`)
+  record('布局：原生视图区在地址栏之下（地址栏不被原生视图遮挡）', areaBelowToolbar === true)
   await shot('browser-panel')
   // 浏览器目标初始为 about:blank 或空 URL（deferredUrl）
   const pageUrl = page?.url ?? ''

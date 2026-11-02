@@ -190,6 +190,19 @@ browser Surface 只能导航与呈现；页面元素对壳层不可见。
   - 契约文档：`docs/browser-plugin-ipc-contract.md`。
   - 证据见 `docs/susu/plan/evidence/W6/extraction.md`。
 
+- 2026-11-02 **done**：W6.7 真实窗口复核（issue #11 追加反馈「点击新建浏览器没有
+  任何反应」「放大按钮、新建浏览器按钮都太大，黑色太深」）。
+  - **发现真缺陷**：原生 `WebContentsView` 画在渲染层之上，而视图区
+    `position:absolute; inset:0` 铺满整个面板——原生视图盖住地址栏与提取
+    面板；新建浏览器初始是 `about:blank` 白屏且地址栏被盖，**看起来就是
+    「点了没反应」**。此前的证据截图拍不到这一层（CDP 只拍渲染进程）。
+  - **修复**：browser 视图区改为 flex 流内剩余空间；新建的空白浏览器自动
+    聚焦地址栏；`新建浏览器/新建终端` 由近黑实心改为浅底细边框并收小；
+    窗口控件 46×36 → 32×28（titlebar 占位 138px → 96px）。
+  - **验收方式升级**：改用 OS 级抓屏拍真实窗口（含原生视图层），
+    证据 `docs/susu/plan/evidence/W6/live/05-window-native.png`；
+    smoke 新增回归断言「原生视图区在地址栏之下」；smoke-browser 30/30。
+
 ## 来源原文
 
 ### 本地文件：docs/susu/plan/phases/W6-browser-extraction.md

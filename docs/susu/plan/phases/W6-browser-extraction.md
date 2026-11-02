@@ -123,6 +123,32 @@ Agent 使用，同时**不放宽** W5 立下的红线（无 `executeJavaScript`�
 - **完成标准**：宿主与插件之间只有一份契约；换宿主或换 desktop 版本时
   只需声明版本号，不复制通道映射；契约漂移可被自动化断言发现。
 
+## W6.7 真实窗口复核：原生视图遮挡与按钮尺度
+
+- **改动位置**：`apps/desktop/src/renderer/src/styles.css`、
+  `plugins/browser/src/renderer/BrowserPanel.tsx`、`tools/smoke-browser.ts`。
+- **来源**：issue #11 追加反馈——「点击新建浏览器没有任何反应」「放大按钮、
+  新建浏览器按钮都太大，黑色太深」。
+- **实施**：
+  1. **原生视图遮挡（真缺陷）**：原生 `WebContentsView` 永远画在渲染层之上，
+     而 `.surface-view-area` 原是 `position:absolute; inset:0`——铺满整个
+     `.surface-view`，于是原生视图盖住地址栏、提示行与提取面板。新建的浏览器
+     初始是 `about:blank`（白屏），地址栏又被盖住，**看起来就是「点了没反应」**。
+     修复：browser 的视图区改为 flex 流内的剩余空间
+     （`.browser-surface .surface-view-area { position: relative; flex: 1 }`），
+     地址栏与面板在上、原生视图在下。
+     附：新建的空白浏览器自动聚焦地址栏，用户可直接输入地址。
+  2. **按钮尺度**：`新建浏览器 / 新建终端` 从近黑实心块改为浅底 + 细边框
+     （`.terminal-toolbar button.primary`），尺寸同步收小；窗口控件
+     （最小化/最大化/关闭）从 46×36 收窄到 32×28，titlebar 占位同步收窄
+     （`--window-controls-width: 138px → 96px`）。
+  3. **可核查性**：新增真实窗口截图（OS 级抓屏，含原生视图——CDP 截图拍不到
+     原生视图层）到 `docs/susu/plan/evidence/W6/live/`；smoke 新增回归断言
+     「原生视图区在地址栏之下」。
+- **验证**：单元测试 browser 131/131、desktop 136/136；smoke-browser 30/30；
+  真实窗口截图确认地址栏、提取面板与页面三者同时可见。
+- **完成标准**：新建浏览器后地址栏立即可见可用；按钮尺度与壳内其它控件一致。
+
 ## 阶段回退
 
 移除 browser 的两个提取窄通道与面板入口即可回到 W5 基线；

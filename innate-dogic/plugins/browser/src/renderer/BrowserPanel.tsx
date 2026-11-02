@@ -109,6 +109,7 @@ export function BrowserPanel({
   api, descriptor, active, onRequestClose, layout,
 }: BrowserPanelProps): JSX.Element {
   const areaRef = useRef<HTMLDivElement>(null)
+  const addressRef = useRef<HTMLInputElement>(null)
   const descriptorRef = useRef<SurfaceDescriptor>(descriptor)
   descriptorRef.current = descriptor
   const [state, setState] = useState<BrowserSessionState | null>(null)
@@ -125,6 +126,8 @@ export function BrowserPanel({
   const [elementDetail, setElementDetail] = useState<BrowserElementDetail | null>(null)
   const [extracting, setExtracting] = useState(false)
   const [extractNotice, setExtractNotice] = useState('')
+  /** W6.7：地址栏是否已自动聚焦过（新建的空白浏览器应能直接输入地址）。 */
+  const autoFocusedRef = useRef(false)
 
   const bounds = useCallback(() => readBounds(areaRef.current), [])
 
@@ -186,6 +189,17 @@ export function BrowserPanel({
   }, [active, attempt, bounds, api])
 
   useEffect(() => { void refresh() }, [refresh, attempt])
+
+  /**
+   * W6.7：新建的浏览器还没有页面（初始 about:blank）——自动聚焦地址栏，
+   * 用户可直接输入地址，不必先找到并点击地址栏。
+   * 已有页面的会话不抢焦点（切回标签时不该打断滚动/输入）。
+   */
+  useEffect(() => {
+    if (autoFocusedRef.current || !state) return
+    autoFocusedRef.current = true
+    if (state.currentUrl == null) addressRef.current?.focus()
+  }, [state])
 
   // W5.6：挂载时消费布局恢复 URL——用户可见地重新导航；恢复后不再重复导航。
   useEffect(() => {
@@ -313,6 +327,7 @@ export function BrowserPanel({
         <button type="button" className="browser-nav-btn" onClick={() => void reload()} disabled={!canReload} title="刷新">⟳</button>
         <button type="button" className="browser-nav-btn" onClick={() => void stop()} disabled={!state?.loading} title="停止">⏹</button>
         <input
+          ref={addressRef}
           className="browser-address"
           value={input}
           onChange={(event) => setInput(event.target.value)}

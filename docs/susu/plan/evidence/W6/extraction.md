@@ -277,6 +277,66 @@ docs/browser-plugin-ipc-contract.md   新增：契约文档
 
 ---
 
+## 3.6 真实窗口复核：原生视图遮挡与按钮尺度（W6.7）
+
+### 3.6.1 为什么之前的截图看不出来
+
+CDP 的 `Page.captureScreenshot` 只拍**渲染进程**的画面；原生 `WebContentsView`
+是独立的原生图层，**拍不到**。所以 W6.0–W6.6 的证据截图里，地址栏与提取面板
+都在，但真实窗口上原生视图其实盖在它们上面——**之前的验收方式看不到这一层**。
+本节改用 OS 级抓屏（`CopyFromScreen` + 窗口 DPI 换算）拍真实窗口。
+
+### 3.6.2 观察到的真缺陷
+
+| 现象 | 根因 |
+| --- | --- |
+| 点「新建浏览器」像"没反应" | 新建浏览器初始是 `about:blank`（白屏）；而原生视图盖住了地址栏，用户既看不到页面也无处输入地址 |
+| 提取结果看不见 | `.browser-elements` / `.browser-element-detail` 同样被原生视图盖住 |
+| 放大按钮、新建浏览器按钮太大、黑色太深 | 窗口控件 46×36；`button.primary` 用近黑 `--accent` 实心 |
+
+原生视图遮挡的根因是 `.surface-view-area { position: absolute; inset: 0 }`：
+它铺满整个 `.surface-view`，把地址栏、提示行与提取面板全盖住——原生视图永远
+画在渲染层之上。
+
+### 3.6.3 修复
+
+```text
+apps/desktop/src/renderer/src/styles.css
+├─ .browser-surface .surface-view-area { position: relative; inset: auto; flex: 1; min-height: 0; }
+│    browser 的视图区改为流内剩余空间：地址栏与面板在上，原生视图在下
+├─ .terminal-toolbar button.primary { 浅底 + 细边框 + 收小尺寸 }
+│    「新建浏览器 / 新建终端」不再是大块近黑
+├─ .titlebar .window-controls-btn { width: 32px; height: 28px; }
+└─ .titlebar-strip { --window-controls-width: 96px }   （原 138px = 3×46）
+
+plugins/browser/src/renderer/BrowserPanel.tsx
+└─ 新建的空白浏览器自动聚焦地址栏（已有页面的会话不抢焦点）
+```
+
+### 3.6.4 真实窗口证据（OS 级抓屏，含原生视图层）
+
+`docs/susu/plan/evidence/W6/live/browser-native-window.png` —— 修复后同一场景：
+地址栏、提取清单、详情卡片与页面**同时可见**，页面渲染在面板之下。
+
+![真实窗口（原生视图 + 地址栏 + 提取面板同屏）](./live/browser-native-window.png)
+
+抓屏脚本：[`tools/capture-window.ps1`](../../../../tools/capture-window.ps1)
+（OS 级 `CopyFromScreen` + 窗口 DPI 换算；把窗口临时置顶再截图，
+避免被其它窗口压住）。
+
+### 3.6.5 回归断言
+
+smoke-browser 新增一项：
+
+```text
+[smoke-browser] ✓ 布局：原生视图区在地址栏之下（地址栏不被原生视图遮挡）
+```
+
+判据为渲染层几何：`area.top >= toolbar.bottom`（视图区起点不低于地址栏底边），
+直接锁住"原生视图不得盖住地址栏"这条布局约束。
+
+---
+
 ## 4. 未做与后续
 
 | 项 | 原因 | 计划 |

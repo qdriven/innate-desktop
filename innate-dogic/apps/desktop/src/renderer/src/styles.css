@@ -32,11 +32,13 @@ body {
 .app { display: flex; flex-direction: column; height: 100vh; }
 
 /* W1a 顶栏组合；尺寸与窗口控件 chrome 由 packages/theme/src/shell.css 提供。 */
-.titlebar-strip { --window-controls-width: 138px; flex-shrink: 0; }
+.titlebar-strip { --window-controls-width: 96px; flex-shrink: 0; }
 .titlebar-strip .titlebar-left { gap: 6px; padding-left: 10px; }
 .titlebar .logo { color: var(--text); font-size: var(--font-title); }
 .titlebar button { -webkit-app-region: no-drag; }
-.titlebar .window-controls-btn { width: 46px; height: 36px; padding: 0; border-radius: 0; }
+/* 窗口控件（W6.7）：收窄到 32×28——46×36 的按钮在 36px 顶栏里视觉过重，
+ * 与壳内其它控件的尺度也不齐。 */
+.titlebar .window-controls-btn { width: 32px; height: 28px; padding: 0; border-radius: 0; }
 .titlebar-tabs { flex: 1; align-self: stretch; min-width: 0; }
 .titlebar-right { display: flex; align-items: center; height: 100%; min-width: 0; gap: 8px; -webkit-app-region: no-drag; }
 .titlebar-status-slot:empty { width: 0; }
@@ -225,6 +227,15 @@ td .dim { font-size: var(--font-xs); }
 .surface-slot-body { flex: 1; min-height: 0; position: relative; }
 .surface-view { position: absolute; inset: 0; }
 .surface-view-area { position: absolute; inset: 0; }
+/**
+ * browser 的视图区改为流内剩余空间（W6.7）。
+ *
+ * 原生 WebContentsView 永远画在渲染层**之上**——视图区若仍绝对定位铺满
+ * `.surface-view`，原生视图会盖住地址栏、提示行与提取面板：新建的浏览器
+ * 初始是 about:blank（白屏），地址栏又被盖住，看起来就是「点了没反应」。
+ * 改成 flex 流内的剩余空间后，地址栏与面板在上、原生视图在下，各就各位。
+ */
+.browser-surface .surface-view-area { position: relative; inset: auto; flex: 1; min-height: 0; }
 .surface-tabstrip, .workspace-tabstrip {
   min-height: 36px; display: flex; align-items: center; gap: 3px; padding: 4px 7px;
   overflow-x: auto; flex-shrink: 0; background: var(--panel); border-bottom: 1px solid var(--border);
@@ -448,6 +459,16 @@ td .dim { font-size: var(--font-xs); }
   display: flex; align-items: center; gap: 8px; padding: 6px 10px; flex-shrink: 0;
   background: var(--panel); border-bottom: 1px solid var(--border);
 }
+/**
+ * 页级工具栏的主操作（W6.7）：「新建浏览器 / 新建终端」原是近黑实心块，
+ * 视觉过重。改为浅底 + 细边框，尺寸同步收小——主操作靠位置与文案识别，
+ * 不靠大面积填黑。
+ */
+.terminal-toolbar button.primary {
+  padding: 3px 10px; font-size: var(--font-xs); font-weight: 500;
+  background: var(--panel-2); border-color: var(--border); color: var(--text);
+}
+.terminal-toolbar button.primary:hover:not(:disabled) { border-color: var(--accent); filter: none; }
 .terminal-root-label { color: var(--dim); font-size: var(--font-2xs); }
 .terminal-panel { position: relative; height: 100%; min-height: 0; display: flex; flex-direction: column; }
 .terminal-title { font-size: var(--font-xs); color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
