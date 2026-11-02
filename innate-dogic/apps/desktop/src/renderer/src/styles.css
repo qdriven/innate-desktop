@@ -84,6 +84,12 @@ body {
   background: var(--sidebar); border-right: 1px solid var(--border);
   padding: 6px 0;
 }
+/* W6.9（关键修复）：@innate/ui Sidebar 原语的容器是 fixed inset-y-0 z-10 h-svh——
+   默认铺满整个视口，肉眼透明但 pointer-events:auto，会吞掉中栏与内容区的全部
+   真实鼠标点击（「新建终端/浏览器点了没反应」的最终根因；JS .click() 不受影响，
+   所以此前自动化全部绿灯）。contain: layout 使 fixed 后代的包含块回落到本元素，
+   覆盖面收窄回 40px 侧栏，视觉不变、点击恢复。 */
+.sidebar-chrome { contain: layout; }
 .nav { display: flex; flex-direction: column; gap: 2px; width: 100%; align-items: center; }
 .nav-item {
   display: flex; align-items: center; justify-content: center;

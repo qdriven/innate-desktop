@@ -82,6 +82,9 @@ export function registerIpc(mainWindow: BrowserWindow): void {
   })()
 
   // 认证 URL 只在对应 runtime provider 内解析；renderer 只提交安全 descriptor。
+  // W6.9：magpie 控制台 surface 已摘除——其原生 WebContentsView 曾在快照恢复
+  // /控制台页路径下自动挂载，盖住渲染层吞掉全部真实点击（「点击没反应」根因）。
+  // 网关状态 pill、启动/打开控制台按钮（外部浏览器）保留。
   surfaces.registerProvider({
     id: 'harness',
     kind: 'webcontents',
@@ -91,15 +94,6 @@ export function registerIpc(mainWindow: BrowserWindow): void {
         return { ok: false, detail: 'Harness 尚未运行，请先启动对话' }
       }
       return { ok: true, url: state.url }
-    },
-  })
-  surfaces.registerProvider({
-    id: 'magpie-console',
-    kind: 'webcontents',
-    resolve: async () => {
-      const ready = await ensureMagpieConsole()
-      if (!ready.ok || !ready.url) return { ok: false, detail: ready.detail }
-      return { ok: true, url: ready.url }
     },
   })
   surfaces.registerProvider(browser.provider)

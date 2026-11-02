@@ -3,12 +3,12 @@ import type { SurfaceDescriptor } from '@dogic/core/surface'
 
 /** 中栏 Surface 标识；标签条本身不认识这些 id，映射只在 App 组合层。 */
 export const HARNESS_SURFACE_ID = 'harness'
-export const MAGPIE_CONSOLE_SURFACE_ID = 'magpie-console'
 
 export const HARNESS_PROVIDER_ID = 'harness'
-export const MAGPIE_CONSOLE_PROVIDER_ID = 'magpie-console'
 export const TERMINAL_PROVIDER_ID = 'terminal'
 export const BROWSER_PROVIDER_ID = 'browser'
+/** W6.9：magpie 控制台 surface 已摘除；仅保留 provider id 用于历史快照清理。 */
+export const MAGPIE_CONSOLE_PROVIDER_ID = 'magpie-console'
 
 export const harnessSurface = (): SurfaceDescriptor => ({
   id: HARNESS_SURFACE_ID,
@@ -16,14 +16,6 @@ export const harnessSurface = (): SurfaceDescriptor => ({
   kind: 'webcontents',
   title: 'DeepSeek Harness',
   capabilities: ['agent:tools'],
-})
-
-export const magpieConsoleSurface = (): SurfaceDescriptor => ({
-  id: MAGPIE_CONSOLE_SURFACE_ID,
-  providerId: MAGPIE_CONSOLE_PROVIDER_ID,
-  kind: 'webcontents',
-  title: 'magpie 控制台',
-  capabilities: ['network:navigate'],
 })
 
 /** terminal Surface（W4.4）：id 由终端页按打开顺序派生（terminal-1、terminal-2…）。 */
@@ -65,7 +57,6 @@ export function nextSurfaceIndex(prefix: 'browser' | 'terminal', existingIds: re
 /** Surface → 壳页面映射；simple 模式的控制台落在「设置」页，终端仅 dev 可见。 */
 export function surfacePageId(providerId: string, mode: AppMode): string | undefined {
   if (providerId === HARNESS_PROVIDER_ID) return 'chat'
-  if (providerId === MAGPIE_CONSOLE_PROVIDER_ID) return mode === 'simple' ? 'settings' : 'console'
   if (providerId === TERMINAL_PROVIDER_ID) return mode === 'dev' ? 'terminal' : undefined
   if (providerId === BROWSER_PROVIDER_ID) return mode === 'dev' ? 'browser' : undefined
   return undefined

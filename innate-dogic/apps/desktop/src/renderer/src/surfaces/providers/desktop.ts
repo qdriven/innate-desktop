@@ -1,5 +1,5 @@
 import { api } from '../../api'
-import { BROWSER_PROVIDER_ID, HARNESS_PROVIDER_ID, MAGPIE_CONSOLE_PROVIDER_ID } from '../catalog'
+import { BROWSER_PROVIDER_ID, HARNESS_PROVIDER_ID } from '../catalog'
 import { SurfaceProviderRegistry } from '../provider-registry'
 import type { SurfaceProvider } from '../provider-registry'
 import { createTerminalProvider } from './terminal'
@@ -33,16 +33,10 @@ export function createDesktopSurfaceProviders(): SurfaceProviderRegistry {
       id: HARNESS_PROVIDER_ID,
       actions: [{ label: '查看日志', run: () => api.openLogs() }],
     }),
-    () => createWebContentsProvider({
-      id: MAGPIE_CONSOLE_PROVIDER_ID,
-      actions: [
-        { label: '启动 magpie 并重试', run: () => api.startMagpie(), retryAfter: true },
-        { label: '浏览器打开', run: () => api.openMagpieWeb() },
-      ],
-    }),
     () => createTerminalProvider(api),
     // browser Surface（W5.3）：地址栏面板 + 宿主视图生命周期；导航守卫在 main 侧执行。
     () => createBrowserProvider(api, layout),
+    // W6.9：magpie 控制台 provider 已摘除（原生视图遮挡/吞点击根因）。
   ]
   for (const factory of factories) {
     try {

@@ -183,6 +183,44 @@ Agent 使用，同时**不放宽** W5 立下的红线（无 `executeJavaScript`�
 - **完成标准**：任何时刻「新建终端/新建浏览器」都产生新标签与新会话；
   主页一步可达终端/浏览器。
 
+## W6.9 真实点击修复：两层「点击吞噬者」+ magpie 集成摘除
+
+- **改动位置**：`apps/desktop/src/renderer/src/shell/ShellSidebar.tsx`、
+  `apps/desktop/src/renderer/src/styles.css`、
+  `apps/desktop/src/renderer/src/surfaces/catalog.ts`、
+  `apps/desktop/src/renderer/src/surfaces/providers/desktop.ts`、
+  `apps/desktop/src/renderer/src/ConsolePage.tsx`、
+  `apps/desktop/src/renderer/src/App.tsx`、
+  `apps/desktop/src/main/ipc.ts`、`tools/smoke-desktop.ts`。
+- **来源**：issue #11 追加反馈——W6.8 修复后「还是不能工作」。
+- **方法论转折**：此前验证全用 CDP `Runtime.evaluate` 里的 `JS .click()`——
+  它不受遮挡/命中测试影响，直达处理器，所以**自动化全绿而真实点击全死**。
+  改用 `Input.dispatchMouseEvent`（受信输入，等价物理鼠标）后才复现并定位。
+- **根因一（CSS，最终根因）**：W1b 起左栏 `ShellSidebar` 用 `@innate/ui`
+  shadcn 风格 `SidebarProvider/Sidebar` 原语承载，其容器为
+  `fixed inset-y-0 z-10 h-svh`——**铺满整个视口**（实测 1105×762），
+  肉眼透明但 `pointer-events:auto`，菜单项宽达 1089px，恰好压在
+  「新建终端/新建浏览器」按钮上。修复：`SidebarProvider` 挂
+  `sidebar-chrome` 类 + `contain: layout`，使 fixed 后代的包含块回落到
+  40px 侧栏本身；受信点击回归通过（命中链从 `LI.menu-item` 变回
+  `BUTTON.primary`）。
+- **根因二（原生视图）**：magpie 控制台 surface 的 `WebContentsView`
+  永远画在渲染层之上，快照恢复/控制台页路径会自动拉起并遮挡主界面；
+  另在用户机上发现 16 个历史会话遗留的 magpie 控制台孤儿进程（其 CWD
+  锁死 win-unpacked 目录，导致打包报 EBUSY）。
+- **实施（用户决策：magpie 集成本阶段完全移除）**：
+  1. main 不再注册 `magpie-console` surface provider——任何路径都无法
+     创建该原生视图；`surfaceShow('magpie-console')` 被主进程拒绝。
+  2. renderer 摘除 provider 工厂与 `magpieConsoleSurface`；启动时
+     `tabs.removeProvider(MAGPIE_CONSOLE_PROVIDER_ID)` 清理历史快照残留。
+  3. 控制台/设置页降级为占位说明；网关状态 pill 与总览卡片保留（被动）。
+  4. smoke：控制台视图断言段替换为「无原生视图 + provider 必须被拒」回归。
+- **验证**：desktop 单测 145/145、typecheck 通过；打包版 + 清空 userData +
+  受信点击实测：新建终端 → 真实 PTY（cmd 提示符可交互）、新建浏览器 →
+  地址栏面板 + 原生视图就位、页面 target 集合中无 magpie。
+- **完成标准**：真实鼠标（而非 JS 派发）可完成全部核心操作；
+  中栏内容区不再有任何全视口命中层。
+
 ## 阶段回退
 
 移除 browser 的两个提取窄通道与面板入口即可回到 W5 基线；

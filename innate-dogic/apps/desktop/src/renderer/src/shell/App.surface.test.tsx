@@ -96,25 +96,14 @@ afterEach(() => {
 })
 
 describe('W1c 壳层多 Surface 标签', () => {
-  it('控制台进入统一中栏槽：只提交安全 descriptor 与 bounds，不带 URL', async () => {
+  it('W6.9：控制台页为占位说明，不再创建 magpie 控制台 Surface（无原生视图）', async () => {
     render(<App />)
     await waitFor(() => expect(screen.getByTitle('总览')).toBeTruthy())
     fireEvent.click(screen.getByTitle('模型配置'))
 
-    await waitFor(() => expect(screen.getByTestId('surface-tabs')).toBeTruthy())
-    expect(screen.getByRole('tab', { name: 'magpie 控制台' })).toBeTruthy()
-    await waitFor(() => expect(apiMocks.surfaceShow).toHaveBeenCalled())
-    const [descriptor, bounds] = apiMocks.surfaceShow.mock.calls[0] ?? []
-    expect(descriptor).toEqual({
-      id: 'magpie-console',
-      providerId: 'magpie-console',
-      kind: 'webcontents',
-      title: 'magpie 控制台',
-      capabilities: ['network:navigate'],
-    })
-    expect(JSON.stringify(descriptor)).not.toContain('url')
-    expect(JSON.stringify(descriptor)).not.toContain('token')
-    expect(bounds).toMatchObject({ x: expect.any(Number), y: expect.any(Number) })
+    await waitFor(() => expect(screen.getByText(/magpie 控制台在本阶段未集成/)).toBeTruthy())
+    // 不再有任何 surface 提交：控制台原生视图是「点击没反应」的根因
+    expect(apiMocks.surfaceShow).not.toHaveBeenCalled()
   })
 
   it('Harness 运行时成为对话页的一个标签，切换标签只换激活项', async () => {
@@ -129,16 +118,21 @@ describe('W1c 壳层多 Surface 标签', () => {
     expect(descriptor).toMatchObject({ id: 'harness', providerId: 'harness', kind: 'webcontents' })
   })
 
-  it('Harness 运行时标签在控制台页仍存在（同一中栏槽多标签并存）', async () => {
+  it('W6.9：Harness 标签跨控制台页导航保留，回到对话页重新可见', async () => {
     apiMocks.getHarnessState.mockResolvedValue({ phase: 'running', message: 'Harness 运行中' })
     render(<App />)
     await waitFor(() => expect(screen.getByTitle('对话')).toBeTruthy())
-    fireEvent.click(screen.getByTitle('模型配置'))
+    fireEvent.click(screen.getByTitle('对话'))
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'DeepSeek Harness' })).toBeTruthy())
 
-    await waitFor(() => expect(screen.getByTestId('surface-tabs')).toBeTruthy())
-    const tabs = screen.getAllByRole('tab').map((tab) => tab.textContent)
-    expect(tabs).toContain('DeepSeek Harness')
-    expect(tabs).toContain('magpie 控制台')
+    // 控制台页现在是占位页（无中栏槽），标签保留在模型里
+    fireEvent.click(screen.getByTitle('模型配置'))
+    await waitFor(() => expect(screen.getByText(/magpie 控制台在本阶段未集成/)).toBeTruthy())
+    expect(apiMocks.surfaceHide).toHaveBeenCalled()
+
+    // 回到对话页：Harness 标签仍在并重新附着
+    fireEvent.click(screen.getByTitle('对话'))
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'DeepSeek Harness' })).toBeTruthy())
   })
 
   it('关闭标签只销毁对应 Surface，不影响其它标签', async () => {
@@ -147,30 +141,30 @@ describe('W1c 壳层多 Surface 标签', () => {
     await waitFor(() => expect(screen.getByTitle('对话')).toBeTruthy())
     fireEvent.click(screen.getByTitle('对话'))
     await waitFor(() => expect(screen.getByRole('tab', { name: 'DeepSeek Harness' })).toBeTruthy())
-    fireEvent.click(screen.getByTitle('模型配置'))
-    await waitFor(() => expect(screen.getByRole('tab', { name: 'magpie 控制台' })).toBeTruthy())
 
-    fireEvent.click(screen.getByLabelText('关闭 magpie 控制台'))
-    await waitFor(() => expect(apiMocks.surfaceClose).toHaveBeenCalledWith('magpie-console'))
+    // 浏览器页建 browser-1，两处 Surface 互不影响
+    fireEvent.click(screen.getByTitle('浏览器'))
+    await waitFor(() => expect(screen.getByRole('heading', { name: '浏览器' })).toBeTruthy())
+    fireEvent.click(screen.getAllByRole('button', { name: '新建浏览器' })[0] as HTMLElement)
+    await waitFor(() => expect(apiMocks.surfaceShow).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByLabelText('关闭 浏览器 1'))
+    await waitFor(() => expect(apiMocks.surfaceClose).toHaveBeenCalledWith('browser-1'))
     expect(apiMocks.surfaceClose).not.toHaveBeenCalledWith('harness')
+    fireEvent.click(screen.getByTitle('对话'))
     await waitFor(() => expect(screen.getByRole('tab', { name: 'DeepSeek Harness' })).toBeTruthy())
   })
 })
 
 describe('W1c 运行时降级', () => {
-  it('控制台 provider 打开失败：错误与恢复动作显式，壳与其它页面仍可用', async () => {
-    apiMocks.surfaceShow.mockResolvedValue({ ok: false, detail: '控制台启动失败' })
+  it('W6.9：控制台页占位可用，壳与其它页面不受影响', async () => {
     render(<App />)
     await waitFor(() => expect(screen.getByTitle('总览')).toBeTruthy())
     fireEvent.click(screen.getByTitle('模型配置'))
 
-    await waitFor(() => expect(screen.getByTestId('surface-error')).toBeTruthy())
-    expect(screen.getByText('控制台启动失败')).toBeTruthy()
-    expect(screen.getByRole('button', { name: '重试' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '启动 magpie 并重试' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '浏览器打开' })).toBeTruthy()
+    await waitFor(() => expect(screen.getByText(/magpie 控制台在本阶段未集成/)).toBeTruthy())
+    expect(screen.queryByTestId('surface-error')).toBeNull()
 
-    // W3：工作区不再是导航页；返回总览页验证壳与内容页仍可用
     fireEvent.click(screen.getByTitle('总览'))
     await waitFor(() => expect(screen.getByText('dsh × magpie 工作台')).toBeTruthy())
   })
@@ -186,7 +180,7 @@ describe('W1c 运行时降级', () => {
     await waitFor(() => expect(screen.getByTitle('设置')).toBeTruthy())
     expect(screen.getByText(/尚未安装 dsh/)).toBeTruthy()
     fireEvent.click(screen.getByTitle('设置'))
-    await waitFor(() => expect(screen.getByTestId('surface-tabs')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/magpie 控制台在本阶段未集成/)).toBeTruthy())
   })
 
   it('Harness 启动失败：保留错误信息与查看日志入口，壳继续可用', async () => {

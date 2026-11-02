@@ -34,10 +34,8 @@ import {
   HARNESS_PROVIDER_ID,
   HARNESS_SURFACE_ID,
   MAGPIE_CONSOLE_PROVIDER_ID,
-  MAGPIE_CONSOLE_SURFACE_ID,
   browserSurface,
   harnessSurface,
-  magpieConsoleSurface,
   nextSurfaceIndex,
   surfacePageId,
   terminalSurface,
@@ -76,6 +74,9 @@ export default function App({ rightPanel = true }: { rightPanel?: boolean }): JS
       }
     }
     providersRef.current = registry
+    // W6.9：magpie 集成已摘除——历史快照里恢复出的控制台标签一并清掉，
+    // 避免指向已不存在的 provider 的死标签残留。
+    tabs.removeProvider(MAGPIE_CONSOLE_PROVIDER_ID)
   }
   const providers = providersRef.current
 
@@ -232,12 +233,8 @@ export default function App({ rightPanel = true }: { rightPanel?: boolean }): JS
       return
     }
     if (resolvedTab === 'console' || resolvedTab === 'settings') {
-      if (providers.isDisabled(MAGPIE_CONSOLE_PROVIDER_ID)) {
-        tabs.deactivate()
-        return
-      }
-      tabs.open(magpieConsoleSurface())
-      tabs.activate(MAGPIE_CONSOLE_SURFACE_ID)
+      // W6.9：magpie 控制台 surface 已摘除，控制台/设置页只是普通页面。
+      tabs.deactivate()
       return
     }
     // 内容页（overview/models/tools）：摘掉 Harness/控制台激活，保留 workspace 文档激活。
@@ -258,18 +255,8 @@ export default function App({ rightPanel = true }: { rightPanel?: boolean }): JS
     if (surface.providerId === HARNESS_PROVIDER_ID) {
       void api.stopHarness()
       setTab('chat')
-      return
-    }
-    if (surface.providerId === MAGPIE_CONSOLE_PROVIDER_ID &&
-        (resolvedTab === 'console' || resolvedTab === 'settings')) {
-      setTab(harnessRunning ? 'chat' : defaultPageId(mode ?? 'dev'))
     }
   }, [providers, tabs, resolvedTab, harnessRunning, mode])
-
-  const reconnectConsole = useCallback(() => {
-    tabs.open(magpieConsoleSurface())
-    tabs.activate(MAGPIE_CONSOLE_SURFACE_ID)
-  }, [tabs])
 
   if (!modeLoaded) return <div className="app" />
   if (mode === null) return <ModeGate onChoose={(m) => void chooseMode(m)} />
@@ -284,7 +271,6 @@ export default function App({ rightPanel = true }: { rightPanel?: boolean }): JS
       providers={providers}
       onSwitchSurface={switchSurface}
       onCloseSurface={closeSurface}
-      onReconnect={reconnectConsole}
       status={status}
       harness={harness}
       launching={launching}
@@ -347,7 +333,6 @@ interface ContentBodyProps {
   providers: SurfaceProviderRegistry
   onSwitchSurface(surface: SurfaceDescriptor): void
   onCloseSurface(surface: SurfaceDescriptor): void
-  onReconnect(): void
   status: StatusSnapshot | null
   harness: HarnessState
   launching: boolean
@@ -368,7 +353,7 @@ interface ContentBodyProps {
 
 /**
  * 中栏内容体（W3.4）：内容页在 wsActive 时渲染 contentMode 的 SurfaceSlot（文档标签浮动），
- * 否则渲染页面内容本身。chat/settings/console 页保持各自内部 SurfaceSlot 不变。
+ * 否则渲染页面内容本身。W6.9 起 settings/console 页为普通占位页。
  */
 function ContentBody({
   activeTab,
@@ -376,7 +361,6 @@ function ContentBody({
   providers,
   onSwitchSurface,
   onCloseSurface,
-  onReconnect,
   status,
   harness,
   launching,
@@ -417,15 +401,7 @@ function ContentBody({
           onCloseSurface={onCloseSurface}
         />
       )}
-      {activeTab === 'settings' && (
-        <ConsolePage
-          tabs={tabs}
-          providers={providers}
-          onSwitchSurface={onSwitchSurface}
-          onCloseSurface={onCloseSurface}
-          onReconnect={onReconnect}
-        />
-      )}
+      {activeTab === 'settings' && <ConsolePage />}
       {activeTab === 'terminal' && (
         <TerminalPage
           tabs={tabs}
@@ -448,15 +424,7 @@ function ContentBody({
           : <OverviewContent status={status} harness={harness} launching={launching} launchMsg={launchMsg} onLaunch={onLaunch} onLaunchMagpie={onLaunchMagpie} onOpenTerminal={onOpenTerminal} onOpenBrowser={onOpenBrowser} workspaceRoot={workspaceRoot} />
       )}
       {activeTab === 'models' && (wsActive ? contentSlot(<ModelsTab />) : <ModelsTab />)}
-      {activeTab === 'console' && (
-        <ConsolePage
-          tabs={tabs}
-          providers={providers}
-          onSwitchSurface={onSwitchSurface}
-          onCloseSurface={onCloseSurface}
-          onReconnect={onReconnect}
-        />
-      )}
+      {activeTab === 'console' && <ConsolePage />}
       {activeTab === 'tools' && (wsActive ? contentSlot(<ToolsTab />) : <ToolsTab />)}
     </ContentArea>
   )
