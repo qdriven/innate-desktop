@@ -29,9 +29,20 @@ export default function TerminalPage({ tabs, providers, onSwitchSurface, onClose
   useSyncExternalStore(tabs.subscribe, tabs.getRevision, tabs.getRevision)
   const snapshot = tabs.snapshot()
   const terminalSurfaces = snapshot.surfaces.filter((surface) => surface.providerId === TERMINAL_PROVIDER_ID)
-  const activeTerminal = snapshot.activeId && terminalSurfaces.some((surface) => surface.id === snapshot.activeId)
-    ? snapshot.activeId
-    : undefined
+  /**
+   * 本页要展示的终端 Surface。
+   *
+   * 统一中栏槽里活跃的可能是别的页面的 Surface（如浏览器页开着 browser）——
+   * 此时本页聚焦自己的最近一个 Surface，而不是把别的页面的 Surface 渲染在
+   * 终端页里（与浏览器页同一处理）。
+   */
+  const activeTerminal = (() => {
+    if (terminalSurfaces.length === 0) return undefined
+    if (snapshot.activeId && terminalSurfaces.some((surface) => surface.id === snapshot.activeId)) {
+      return snapshot.activeId
+    }
+    return terminalSurfaces[terminalSurfaces.length - 1]?.id
+  })()
 
   useEffect(() => {
     void api.workspaceGetRoot().then(setRoot).catch(() => setRoot(null))

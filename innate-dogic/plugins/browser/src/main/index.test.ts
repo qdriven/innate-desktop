@@ -8,6 +8,7 @@ import type {
   BrowserSurfaceViewFactory,
   BrowserViewEvent,
 } from './index.js'
+import type { BrowserExtractionPort } from './extraction-cdp.js'
 
 function descriptorInput(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -31,7 +32,7 @@ interface FakeView {
   emit(event: BrowserViewEvent): void
 }
 
-function fakeViewFactory(): {
+function fakeViewFactory(port?: BrowserExtractionPort): {
   factory: BrowserSurfaceViewFactory
   views: FakeView[]
   guardCalls: Array<(url: string) => boolean>
@@ -57,6 +58,7 @@ function fakeViewFactory(): {
       cancelDownloads,
       setBounds,
       subscribe,
+      ...(port ? { extraction: port } : {}),
     }
     views.push({
       view,
@@ -519,5 +521,152 @@ describe('BrowserSurfaceService（受控下载 W5.5）', () => {
   it('视图抽象不提供文件写入通道（类型层保证）', () => {
     // @ts-expect-error BrowserSurfaceView 没有 writeFile/savePath 属性
     void ({} as BrowserSurfaceView).writeFile
+  })
+})
+
+/** 伪造元素提取端口（CDP 只读域的替身）。 */
+function fakeExtractionPort(): {
+  port: BrowserExtractionPort
+  listElements: ReturnType<typeof vi.fn>
+  describeElement: ReturnType<typeof vi.fn>
+} {
+  const listElements = vi.fn(async (limit: number) => ({
+    url: 'https://example.com/page?token=secret',
+    title: '示例页',
+    viewport: { width: 1280, height: 720 },
+    elements: [
+      { ref: 'el-1', role: 'button', name: '提交', tagName: 'BUTTON', rect: { x: 1, y: 2, width: 3, height: 4 } },
+      { ref: 'el-2', role: 'link', name: '文档', tagName: 'A', rect: null },
+    ].slice(0, limit),
+    backendIds: [101, 102].slice(0, limit),
+  }))
+  const describeElement = vi.fn(async (backendNodeId: number) => ({
+    tagName: 'button',
+    role: 'button',
+    name: '提交',
+    selector: 'html > body > button',
+    path: [],
+    textSnippet: '提交',
+    attributes: { type: 'button' },
+    rect: { x: 1, y: 2, width: 3, height: 4 },
+    ...(backendNodeId === 101 ? {} : {}),
+  }))
+  const port: BrowserExtractionPort = { listElements, describeElement }
+  return { port, listElements, describeElement }
+}
+
+describe('BrowserSurfaceService（W6 元素提取）', () => {
+  it('视图没有提取端口时明确拒绝（不做静默降级）', async () => {
+    const { service } = recordingService()
+    await service.open(descriptorInput())
+    const result = await service.extractList('browser-1', undefined)
+    expect(result.ok).toBe(false)
+    expect(result.elements).toEqual([])
+    expect(result.detail).toMatch(/不支持元素提取/)
+  })
+
+  it('清单成功：URL 剥 query，元素按条数上限裁剪', async () => {
+    const { port, listElements } = fakeExtractionPort()
+    const { factory } = fakeViewFactory(port)
+    const service = new BrowserSurfaceService({ factory })
+    await service.open(descriptorInput())
+
+    const result = await service.extractList('browser-1', { limit: 1 })
+    expect(result.ok).toBe(true)
+    expect(result.page?.url).toBe('https://example.com/page')
+    expect(result.page?.title).toBe('示例页')
+    expect(result.elements).toHaveLength(1)
+    expect(listElements).toHaveBeenCalledWith(1)
+  })
+
+  it('清单条数非法时回落到默认值', async () => {
+    const { port, listElements } = fakeExtractionPort()
+    const { factory } = fakeViewFactory(port)
+    const service = new BrowserSurfaceService({ factory })
+    await service.open(descriptorInput())
+
+    await service.extractList('browser-1', { limit: 'many' as unknown as number })
+    expect(listElements).toHaveBeenCalledWith(50)
+  })
+
+  it('详情只接受本会话清单里的 ref（renderer 不能自造 id）', async () => {
+    const { port, describeElement } = fakeExtractionPort()
+    const { factory } = fakeViewFactory(port)
+    const service = new BrowserSurfaceService({ factory })
+    await service.open(descriptorInput())
+    await service.extractList('browser-1', undefined)
+
+    const ok = await service.extractDetail('browser-1', { ref: 'el-1' })
+    expect(ok.ok).toBe(true)
+    expect(ok.element?.tagName).toBe('button')
+    expect(describeElement).toHaveBeenCalledWith(101)
+
+    const bad = await service.extractDetail('browser-1', { ref: 'el-999' })
+    expect(bad.ok).toBe(false)
+    expect(bad.detail).toMatch(/引用无效或已过期/)
+  })
+
+  it('未列清单就取详情：拒绝（ref 未签发）', async () => {
+    const { port, describeElement } = fakeExtractionPort()
+    const { factory } = fakeViewFactory(port)
+    const service = new BrowserSurfaceService({ factory })
+    await service.open(descriptorInput())
+
+    const result = await service.extractDetail('browser-1', { ref: 'el-1' })
+    expect(result.ok).toBe(false)
+    expect(describeElement).not.toHaveBeenCalled()
+  })
+
+  it('非法 ref 形态：拒绝并给出可展示文案', async () => {
+    const { port } = fakeExtractionPort()
+    const { factory } = fakeViewFactory(port)
+    const service = new BrowserSurfaceService({ factory })
+    await service.open(descriptorInput())
+
+    const result = await service.extractDetail('browser-1', { ref: 'evil' })
+    expect(result.ok).toBe(false)
+    expect(result.detail).toMatch(/ref 无效/)
+  })
+
+  it('会话不存在：清单与详情都拒绝', async () => {
+    const { port } = fakeExtractionPort()
+    const { factory } = fakeViewFactory(port)
+    const service = new BrowserSurfaceService({ factory })
+
+    expect((await service.extractList('nope', undefined)).ok).toBe(false)
+    expect((await service.extractDetail('nope', { ref: 'el-1' })).ok).toBe(false)
+  })
+
+  it('页面导航后元素引用作废（旧 ref 不再指向新页面）', async () => {
+    const { port, describeElement } = fakeExtractionPort()
+    const { factory, views } = fakeViewFactory(port)
+    const service = new BrowserSurfaceService({ factory })
+    await service.open(descriptorInput())
+    await service.extractList('browser-1', undefined)
+
+    views[0]?.emit({ type: 'navigated', url: 'https://example.com/next' })
+
+    const result = await service.extractDetail('browser-1', { ref: 'el-1' })
+    expect(result.ok).toBe(false)
+    expect(describeElement).not.toHaveBeenCalled()
+  })
+
+  it('端口异常：转成可展示文案，不抛出到 IPC 层', async () => {
+    const port: BrowserExtractionPort = {
+      listElements: vi.fn(async () => { throw new Error('cdp boom') }),
+      describeElement: vi.fn(async () => { throw new Error('cdp boom') }),
+    }
+    const { factory } = fakeViewFactory(port)
+    const service = new BrowserSurfaceService({ factory })
+    await service.open(descriptorInput())
+
+    const result = await service.extractList('browser-1', undefined)
+    expect(result.ok).toBe(false)
+    expect(result.detail).toMatch(/cdp boom/)
+  })
+
+  it('视图抽象不提供页面脚本执行通道（类型层保证，W6 红线）', () => {
+    // @ts-expect-error BrowserSurfaceView 没有 executeJavaScript 方法
+    void ({} as BrowserSurfaceView).executeJavaScript
   })
 })

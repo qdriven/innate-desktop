@@ -23,7 +23,9 @@ import { WorkspaceService } from '@dogic/plugin-workspace/main'
 import { TerminalService } from '@dogic/plugin-terminal/main'
 import { BrowserSurfaceService } from '@dogic/plugin-browser/main'
 import { createElectronBrowserView } from '@dogic/plugin-browser/main/electron'
+import { BROWSER_IPC_EVENT_CHANNEL } from '@dogic/plugin-browser/ipc'
 import { HarnessRuntime } from './harness'
+import { registerDesktopBrowserIpc } from './browser-ipc'
 import { SurfaceHost } from './surface-host'
 import { ensureMagpieConsole, getConsole, getGateway, startMagpie } from './launcher'
 
@@ -64,7 +66,7 @@ export function registerIpc(mainWindow: BrowserWindow): void {
   const browser = new BrowserSurfaceService({
     factory: (descriptor, guard) => createElectronBrowserView(descriptor, guard, { parentWindow: mainWindow }),
     onEvent: (event) => {
-      if (!mainWindow.isDestroyed()) mainWindow.webContents.send('innate:browser-event', event)
+      if (!mainWindow.isDestroyed()) mainWindow.webContents.send(BROWSER_IPC_EVENT_CHANNEL, event)
     },
   })
   mainWindow.on('closed', () => {
@@ -155,13 +157,9 @@ export function registerIpc(mainWindow: BrowserWindow): void {
   ipcMain.handle('innate:surfaceBounds', (_e, id: unknown, bounds: unknown) => surfaces.setBounds(id, bounds))
   ipcMain.handle('innate:surfaceClose', (_e, id: unknown) => surfaces.close(id))
 
-  // browser 导航窄通道（W5.2）：renderer 只提交安全字段，URL 一律经服务层白名单。
-  ipcMain.handle('innate:browserNavigate', (_e, id: unknown, request: unknown) => browser.navigate(id, request))
-  ipcMain.handle('innate:browserBack', (_e, id: unknown) => browser.back(id))
-  ipcMain.handle('innate:browserForward', (_e, id: unknown) => browser.forward(id))
-  ipcMain.handle('innate:browserReload', (_e, id: unknown) => browser.reload(id))
-  ipcMain.handle('innate:browserStop', (_e, id: unknown) => browser.stop(id))
-  ipcMain.handle('innate:browserState', (_e, id: unknown) => browser.state(id) ?? null)
+  // browser 窄通道（W5.2/W6.6）：按插件 IPC 契约注册——通道名、方法签名与
+  // 能力声明全部来自契约，桌面只声明自己实现的契约版本；版本不兼容即 fail closed。
+  registerDesktopBrowserIpc(browser)
 
   ipcMain.handle('innate:revealDshHome', () => shell.openPath(dshHome()))
   ipcMain.handle('innate:openLogs', () => shell.openPath(path.join(app.getPath('userData'), 'logs')))

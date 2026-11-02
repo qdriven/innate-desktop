@@ -18,7 +18,7 @@ import { spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 interface CdpTarget {
   id: string
@@ -52,6 +52,20 @@ const watchdog = setTimeout(() => {
 }, 900_000)
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * 加载 browser 插件的 IPC 契约清单（插件构建产物）——契约归插件所有，
+ * 桌面与其它宿主都按它接入；冒烟据此核对渲染壳暴露面没有漂移。
+ */
+async function loadBrowserContract(): Promise<{ methods: string[]; channels: Record<string, string> }> {
+  const moduleUrl = pathToFileURL(
+    path.join(root, 'innate-dogic/plugins/browser/dist/shared/ipc.js'),
+  ).href
+  const mod = (await import(moduleUrl)) as {
+    BROWSER_IPC_CONTRACT: { methods: string[]; channels: Record<string, string> }
+  }
+  return mod.BROWSER_IPC_CONTRACT
+}
 let ws: WebSocket | undefined
 const pending = new Map<number, { resolve: (value: unknown) => void }>()
 let seq = 0
@@ -187,6 +201,17 @@ function startTestSite(): Promise<http.Server> {
         res.end('download-body-content')
         return
       }
+      if (url.pathname === '/elements') {
+        // 元素提取靶场：可交互元素 + 一个带凭据形态属性的元素
+        res.end(`<!doctype html><html><body>
+<h1>elements</h1>
+<button id="submit-btn" type="button">提交订单</button>
+<a href="/elements#doc" id="doc-link">使用说明</a>
+<input id="pwd" type="text" name="api_key" placeholder="令牌">
+<input id="real-pwd" type="password" placeholder="密码">
+</body></html>`)
+        return
+      }
       res.end('<!doctype html><html><body><h1>innate-browser-smoke</h1></body></html>')
     })
     server.listen(0, '127.0.0.1', () => resolve(server))
@@ -320,6 +345,63 @@ async function main(): Promise<void> {
   record('权限：页面权限请求全部拒绝，面板呈现脱敏拒绝文案', /已拒绝 .*的 .*权限请求/.test(permNotice), permNotice.slice(0, 100))
   await shot('browser-permission')
 
+  // ---- 元素提取（W6）：CDP 只读域取清单与详情，全程不向访客视图注入脚本 ----
+  await typeAddress(`${siteUrl}elements`)
+  await waitFor(async () => Boolean((await targets()).find((t) => t.type === 'page' && t.url === `${siteUrl}elements`)))
+  await evaluate("document.querySelector('.browser-surface [title=\"提取元素\"]')?.click()")
+  const listShown = await waitFor(async () => {
+    const text = await evaluate<string>("document.querySelector('.browser-elements')?.innerText ?? ''") ?? ''
+    return text.includes('提交订单')
+  }, 25_000)
+  const listText = await evaluate<string>("document.querySelector('.browser-elements')?.innerText ?? ''") ?? ''
+  record('元素提取：清单列出页面可交互元素（角色+名称）', listShown, listText.replace(/\n/g, ' ').slice(0, 120))
+  // 点选元素 → 详情卡片（标签/选择器/文本）
+  await evaluate("[...document.querySelectorAll('.browser-element')].find(b=>b.textContent?.includes('提交订单'))?.click()")
+  const detailShown = await waitFor(async () => {
+    const text = await evaluate<string>("document.querySelector('.browser-element-detail')?.innerText ?? ''") ?? ''
+    return text.length > 0
+  }, 25_000)
+  const detailText = await evaluate<string>("document.querySelector('.browser-element-detail')?.innerText ?? ''") ?? ''
+  record('元素提取：详情含标签与结构选择器', detailShown && /button/.test(detailText) && />/.test(detailText),
+    detailText.replace(/\n/g, ' ').slice(0, 140))
+  // 凭据形态属性脱敏：name="api_key" 的输入框
+  await evaluate("[...document.querySelectorAll('.browser-element')].find(b=>b.textContent?.includes('令牌'))?.click()")
+  const redactedShown = await waitFor(async () => {
+    const text = await evaluate<string>("document.querySelector('.browser-element-detail')?.innerText ?? ''") ?? ''
+    return text.includes('[redacted]')
+  }, 25_000)
+  const redactedText = await evaluate<string>("document.querySelector('.browser-element-detail')?.innerText ?? ''") ?? ''
+  record('元素提取：凭据形态属性脱敏为 [redacted]', redactedShown, redactedText.replace(/\n/g, ' ').slice(0, 140))
+  await shot('browser-extraction')
+
+  // ---- 红线断言：渲染壳无脚本执行通道；访客视图无通用脚本执行入口 ----
+  // processExecute 是 W4 terminal 的受控 process:execute 能力（profile 白名单 +
+  // 审计脱敏，独立于浏览器），不是页面脚本执行通道——按设计排除。
+  const SCRIPT_CHANNEL = /execute|eval|script|runjs/i
+  const ALLOWED_NON_SCRIPT = new Set(['processExecute'])
+  const innateKeys = await evaluate<string[]>("Object.keys(window.innate ?? {})") ?? []
+  const scriptish = innateKeys.filter((k) => SCRIPT_CHANNEL.test(k) && !ALLOWED_NON_SCRIPT.has(k))
+  record('红线：渲染壳 window.innate 无页面脚本执行通道', scriptish.length === 0,
+    scriptish.length ? scriptish.join(',') : `共 ${innateKeys.length} 个通道（processExecute 为 terminal 受控能力）`)
+  // browser 窄通道单独复核：浏览器侧不得有任何脚本执行入口
+  const browserKeys = innateKeys.filter((k) => k.startsWith('browser'))
+  const browserScriptish = browserKeys.filter((k) => SCRIPT_CHANNEL.test(k))
+  record('红线：browser 窄通道集合无脚本执行入口', browserScriptish.length === 0,
+    browserScriptish.join(',') || browserKeys.join(','))
+
+  // ---- 契约一致性（W6.6）：渲染壳暴露的 browser 窄通道 = 插件契约方法集 ----
+  // 契约归插件所有：preload 由契约构造，桌面不手写通道。若渲染壳的通道集合
+  // 与契约方法集不一致，说明宿主与插件漂移。
+  const contract = await loadBrowserContract()
+  const contractApiKeys = [
+    ...contract.methods.map((m) => `browser${m.charAt(0).toUpperCase()}${m.slice(1)}`),
+    'browserOnEvent',
+  ].sort()
+  const browserApiKeys = [...browserKeys].sort()
+  record('契约：渲染壳 browser 窄通道与插件契约方法集一致',
+    JSON.stringify(browserApiKeys) === JSON.stringify(contractApiKeys),
+    `${browserApiKeys.join(',')}${JSON.stringify(browserApiKeys) === JSON.stringify(contractApiKeys) ? '' : ` ≠ 契约 ${contractApiKeys.join(',')}`}`)
+
   // ---- 受控下载：事件到达面板（下载状态行），不自动执行内容 ----
   await typeAddress(`${siteUrl}dl`)
   const dlStarted = await waitFor(async () => {
@@ -390,7 +472,10 @@ async function main(): Promise<void> {
   await evaluate("[...document.querySelectorAll('.nav-item')].find(b=>b.getAttribute('title')==='终端')?.click()")
   await sleep(2_000)
   const terminalRoot = (await evaluate<string>("document.querySelector('.terminal-root-label')?.textContent ?? ''")) ?? ''
-  record('交替切换：终端页加载工作区根（与浏览器并存于统一中栏槽）', /innate-desktop|implement-w4-w5/.test(terminalRoot), terminalRoot.slice(0, 40))
+  // 工作区根名随检出目录而变（worktree/分支名），只断言「已加载一个根目录」，
+  // 不绑定具体目录名——否则换 worktree 就误报。
+  record('交替切换：终端页加载工作区根（与浏览器并存于统一中栏槽）',
+    terminalRoot.trim().length > 0, terminalRoot.slice(0, 40))
   await evaluate("document.querySelector('.terminal-page > .terminal-toolbar > button.primary')?.click()")
   await sleep(1_500)
   const terminalReady = await evaluate<boolean>("Boolean(document.querySelector('.terminal-area textarea'))")

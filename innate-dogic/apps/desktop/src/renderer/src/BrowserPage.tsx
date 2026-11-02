@@ -28,9 +28,20 @@ export default function BrowserPage({ tabs, providers, onSwitchSurface, onCloseS
   useSyncExternalStore(tabs.subscribe, tabs.getRevision, tabs.getRevision)
   const snapshot = tabs.snapshot()
   const browserSurfaces = snapshot.surfaces.filter((surface) => surface.providerId === BROWSER_PROVIDER_ID)
-  const activeBrowser = snapshot.activeId && browserSurfaces.some((surface) => surface.id === snapshot.activeId)
-    ? snapshot.activeId
-    : undefined
+  /**
+   * 本页要展示的浏览器 Surface。
+   *
+   * 统一中栏槽里活跃的可能是别的页面的 Surface（如终端页建过终端）——此时
+   * 本页应聚焦**自己的**最近一个 Surface，而不是把别的页面的 Surface
+   * 渲染在浏览器页里（否则回到浏览器页看到的是终端）。
+   */
+  const activeBrowser = (() => {
+    if (browserSurfaces.length === 0) return undefined
+    if (snapshot.activeId && browserSurfaces.some((surface) => surface.id === snapshot.activeId)) {
+      return snapshot.activeId
+    }
+    return browserSurfaces[browserSurfaces.length - 1]?.id
+  })()
 
   const openBrowser = useCallback((): void => {
     counterRef.current += 1

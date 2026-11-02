@@ -6,6 +6,8 @@ import type {
   BrowserApi,
   BrowserSessionState,
   BrowserSurfaceEvent,
+  BrowserElementDetail,
+  BrowserElementSummary,
   DownloadState,
   DownloadStatus,
 } from '../shared/index.js'
@@ -80,6 +82,16 @@ function downloadStateText(state: DownloadState, percent: number): string {
   return '下载失败'
 }
 
+/** 元素清单条目的展示文案：优先无障碍名称，回落到标签名。 */
+function elementSummaryText(element: BrowserElementSummary): string {
+  const name = element.name.trim()
+  const role = element.role.trim()
+  if (name && role) return `${name}（${role}）`
+  if (name) return name
+  if (role) return role
+  return element.tagName || '元素'
+}
+
 /**
  * browser Surface 面板（W5.3 地址栏，W5.4 权限提示，W5.5 受控下载行）：
  * 地址栏 + 前进/后退/刷新/停止 + 加载进度。
@@ -108,6 +120,11 @@ export function BrowserPanel({
   const focusedRef = useRef(false)
   /** W5.6：本次挂载是否已完成布局恢复（避免重复重导航）。 */
   const restoredRef = useRef(false)
+  /** W6：元素提取——清单、选中项与详情。 */
+  const [elements, setElements] = useState<BrowserElementSummary[]>([])
+  const [elementDetail, setElementDetail] = useState<BrowserElementDetail | null>(null)
+  const [extracting, setExtracting] = useState(false)
+  const [extractNotice, setExtractNotice] = useState('')
 
   const bounds = useCallback(() => readBounds(areaRef.current), [])
 
@@ -245,6 +262,48 @@ export function BrowserPanel({
     void navigate(input.trim())
   }
 
+  /**
+   * W6：列出页面元素（提取元素·清单）。
+   * 元素数据由主进程经 CDP 只读域取回并脱敏；面板只提交会话 id 与条数上限。
+   */
+  const extractList = useCallback(async (): Promise<void> => {
+    setExtracting(true)
+    setExtractNotice('')
+    setElementDetail(null)
+    try {
+      const result = await api.browserExtractList(descriptorRef.current.id, { limit: 50 })
+      if (!result.ok) {
+        setElements([])
+        setExtractNotice(result.detail ?? '提取元素失败')
+        return
+      }
+      setElements(result.elements)
+      if (result.elements.length === 0) setExtractNotice('页面没有可提取的元素')
+    } catch (reason) {
+      setElements([])
+      setExtractNotice(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setExtracting(false)
+    }
+  }, [api])
+
+  /** W6：取单个元素详情（提取元素·详情）。 */
+  const extractDetail = useCallback(async (ref: string): Promise<void> => {
+    setExtractNotice('')
+    try {
+      const result = await api.browserExtractDetail(descriptorRef.current.id, { ref })
+      if (!result.ok) {
+        setElementDetail(null)
+        setExtractNotice(result.detail ?? '提取元素详情失败')
+        return
+      }
+      setElementDetail(result.element ?? null)
+    } catch (reason) {
+      setElementDetail(null)
+      setExtractNotice(reason instanceof Error ? reason.message : String(reason))
+    }
+  }, [api])
+
   const canReload = state?.currentUrl != null
   return (
     <div className="surface-view browser-surface">
@@ -263,7 +322,52 @@ export function BrowserPanel({
           spellCheck={false}
         />
         <button type="submit" className="browser-go" disabled={input.trim().length === 0}>前往</button>
+        <button
+          type="button"
+          className="browser-nav-btn"
+          onClick={() => void extractList()}
+          disabled={extracting}
+          title="提取元素"
+        >
+          ⌖
+        </button>
       </form>
+      {elements.length > 0 && (
+        <div className="browser-elements">
+          {elements.map((element) => (
+            <button
+              key={element.ref}
+              type="button"
+              className="browser-element"
+              onClick={() => void extractDetail(element.ref)}
+            >
+              {elementSummaryText(element)}
+            </button>
+          ))}
+        </div>
+      )}
+      {extractNotice && (
+        <div className="browser-notice">
+          <span>{extractNotice}</span>
+        </div>
+      )}
+      {elementDetail && (
+        <div className="browser-element-detail">
+          {elementDetail.screenshot && (
+            <img className="browser-element-shot" src={elementDetail.screenshot.dataUrl} alt="元素截图" />
+          )}
+          <div className="browser-element-fields">
+            <div><b>标签</b><span>{elementDetail.tagName}</span></div>
+            {elementDetail.role && <div><b>角色</b><span>{elementDetail.role}</span></div>}
+            {elementDetail.name && <div><b>名称</b><span>{elementDetail.name}</span></div>}
+            {elementDetail.selector && <div><b>选择器</b><span>{elementDetail.selector}</span></div>}
+            {elementDetail.textSnippet && <div><b>文本</b><span>{elementDetail.textSnippet}</span></div>}
+            {Object.entries(elementDetail.attributes).map(([key, value]) => (
+              <div key={key}><b>{key}</b><span>{value}</span></div>
+            ))}
+          </div>
+        </div>
+      )}
       {state?.loading && <div className="browser-progress" />}
       {notice && (
         <div className="browser-notice">

@@ -39,6 +39,16 @@ import type {
   BrowserSurfaceEvent,
   DownloadState,
 } from '../shared/index.js'
+import type {
+  BrowserExtractionDetailResult,
+  BrowserExtractionListResult,
+} from '../shared/extraction.js'
+import {
+  parseExtractionDetailRequest,
+  parseExtractionListRequest,
+  sanitizeExtractedUrl,
+} from './extraction.js'
+import type { BrowserExtractionPort } from './extraction-cdp.js'
 
 export type {
   BrowserDescriptor,
@@ -91,6 +101,13 @@ export interface BrowserSurfaceView {
   cancelDownloads(): void
   setBounds(bounds: BrowserViewBounds): void
   subscribe(listener: (event: BrowserViewEvent) => void): () => void
+  /**
+   * W6：元素提取端口（可选）。
+   *
+   * 端口由宿主实现（CDP 只读域），服务层只经它取元素清单与详情。
+   * 端口**不提供**任何页面脚本执行能力——抽象层依旧没有 executeJavaScript。
+   */
+  readonly extraction?: BrowserExtractionPort
 }
 
 /** 导航守卫（W5.3）：页面内导航与重定向目标同样过协议白名单与凭据检查。 */
@@ -129,6 +146,12 @@ interface Session {
   crashed: boolean
   unresponsive: boolean
   active: boolean
+  /**
+   * W6：元素提取引用表——ref → CDP backendNodeId。
+   * renderer 只能引用本会话**最近一次清单**里的 ref，不能自造 id；
+   * 会话关闭时随会话一并丢弃。
+   */
+  extractionRefs: Map<string, number>
 }
 
 /**
@@ -277,6 +300,69 @@ export class BrowserSurfaceService implements IBrowserProvider {
     }
   }
 
+  /**
+   * W6：列出页面元素（提取元素·清单）。
+   *
+   * 元素来源是页面的无障碍树与盒模型（CDP 只读域），不执行页面脚本。
+   * 清单成功后本会话记录 ref → 元素 id 映射，供随后的详情请求引用。
+   */
+  async extractList(id: unknown, input: unknown): Promise<BrowserExtractionListResult> {
+    const session = this.requireSession(id)
+    if (!session) return { ok: false, elements: [], detail: sessionError(id) }
+    const port = session.view.extraction
+    if (!port) return { ok: false, elements: [], detail: '当前浏览器视图不支持元素提取' }
+    const { limit } = parseExtractionListRequest(input)
+    try {
+      const result = await port.listElements(limit)
+      session.extractionRefs = new Map()
+      result.elements.forEach((element, index) => {
+        const backendNodeId = result.backendIds[index]
+        if (typeof backendNodeId === 'number') session.extractionRefs.set(element.ref, backendNodeId)
+      })
+      return {
+        ok: true,
+        page: {
+          url: sanitizeExtractedUrl(result.url),
+          title: result.title.slice(0, 200),
+          viewport: result.viewport,
+        },
+        elements: result.elements,
+      }
+    } catch (reason) {
+      return { ok: false, elements: [], detail: messageOf(reason) }
+    }
+  }
+
+  /**
+   * W6：取单个元素详情（提取元素·详情）。
+   *
+   * 只接受本会话最近一次清单里的 ref——renderer 不能自造 id，
+   * 也不能引用别的会话的元素。
+   */
+  async extractDetail(id: unknown, input: unknown): Promise<BrowserExtractionDetailResult> {
+    const session = this.requireSession(id)
+    if (!session) return { ok: false, detail: sessionError(id) }
+    const port = session.view.extraction
+    if (!port) return { ok: false, detail: '当前浏览器视图不支持元素提取' }
+    let ref: string
+    try {
+      ref = parseExtractionDetailRequest(input).ref
+    } catch (reason) {
+      return { ok: false, detail: messageOf(reason) }
+    }
+    const backendNodeId = session.extractionRefs.get(ref)
+    if (typeof backendNodeId !== 'number') {
+      return { ok: false, detail: '提取详情引用无效或已过期，请重新列出元素' }
+    }
+    try {
+      const element = await port.describeElement(backendNodeId)
+      if (!element) return { ok: false, detail: '提取详情失败：元素已失效' }
+      return { ok: true, element }
+    } catch (reason) {
+      return { ok: false, detail: messageOf(reason) }
+    }
+  }
+
   /** 统一回收：应用退出/窗口关闭路径（销毁全部视图并清理会话）。 */
   dispose(): void {
     for (const session of [...this.sessions.values()]) {
@@ -311,6 +397,7 @@ export class BrowserSurfaceService implements IBrowserProvider {
       crashed: false,
       unresponsive: false,
       active: true,
+      extractionRefs: new Map<string, number>(),
     }
     this.sessions.set(descriptor.id, session)
     return session
@@ -345,6 +432,8 @@ export class BrowserSurfaceService implements IBrowserProvider {
           // 本次加载的最终地址以 navigated 为准（did-navigate 先于 loadURL
           // resolve 到达，goto 随后不得用初始 URL 覆盖）。
           session.pendingDisplay = null
+          // W6：页面已换，元素引用作废——清单里的 ref 不再指向新页面。
+          session.extractionRefs.clear()
           this.emit({ type: 'navigated', id, url: session.displayedUrl })
         } catch (reason) {
           session.failed = sanitizeBrowserDisplayText(messageOf(reason))

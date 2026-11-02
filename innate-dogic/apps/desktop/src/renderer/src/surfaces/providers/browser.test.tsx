@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import type { BrowserNavigateRequest, BrowserSessionState, BrowserSurfaceEvent } from '@dogic/plugin-browser'
+import type {
+  BrowserNavigateRequest,
+  BrowserSessionState,
+  BrowserSurfaceEvent,
+  BrowserExtractionListResult,
+  BrowserExtractionDetailResult,
+} from '@dogic/plugin-browser'
 import type { BrowserPanelApi, BrowserLayoutStore } from '@dogic/plugin-browser/renderer'
 import { BrowserPanel, BrowserLayoutStore as LayoutStore } from '@dogic/plugin-browser/renderer'
 import type { SurfaceDescriptor } from '@dogic/core/surface'
@@ -18,6 +24,8 @@ interface FakeBrowserApi {
   hide: ReturnType<typeof vi.fn>
   bounds: ReturnType<typeof vi.fn>
   close: ReturnType<typeof vi.fn>
+  extractList: ReturnType<typeof vi.fn>
+  extractDetail: ReturnType<typeof vi.fn>
   emit(event: BrowserSurfaceEvent): void
 }
 
@@ -49,6 +57,10 @@ function makeState(overrides: Partial<BrowserSessionState> = {}): BrowserSession
 function makeApi(
   initialState: BrowserSessionState | null = null,
   navigateOverride: { ok: boolean; url: string; detail?: string } | null = null,
+  extractionOverride: {
+    list?: Partial<BrowserExtractionListResult>
+    detail?: Partial<BrowserExtractionDetailResult>
+  } = {},
 ): FakeBrowserApi {
   const listeners = new Set<(event: BrowserSurfaceEvent) => void>()
   const current = { value: initialState }
@@ -75,6 +87,29 @@ function makeApi(
     listeners.add(cb)
     return () => { listeners.delete(cb) }
   })
+  const extractList = vi.fn(async (): Promise<BrowserExtractionListResult> => ({
+    ok: true,
+    page: { url: 'https://example.com/', title: '示例页', viewport: { width: 1280, height: 720 } },
+    elements: [
+      { ref: 'el-1', role: 'button', name: '提交', tagName: 'BUTTON', rect: { x: 1, y: 2, width: 3, height: 4 } },
+      { ref: 'el-2', role: 'link', name: '文档', tagName: 'A', rect: null },
+    ],
+    ...extractionOverride.list,
+  }))
+  const extractDetail = vi.fn(async (): Promise<BrowserExtractionDetailResult> => ({
+    ok: true,
+    element: {
+      tagName: 'button',
+      role: 'button',
+      name: '提交',
+      selector: 'html > body > button',
+      path: [],
+      textSnippet: '提交表单',
+      attributes: { type: 'button', title: '提交' },
+      rect: { x: 1, y: 2, width: 3, height: 4 },
+    },
+    ...extractionOverride.detail,
+  }))
   const api: BrowserPanelApi = {
     browserNavigate: navigate,
     browserBack: back,
@@ -83,6 +118,8 @@ function makeApi(
     browserStop: stop,
     browserState: state,
     browserOnEvent: onEvent,
+    browserExtractList: extractList,
+    browserExtractDetail: extractDetail,
     surfaceShow: show,
     surfaceHide: hide,
     surfaceBounds: bounds,
@@ -90,6 +127,7 @@ function makeApi(
   }
   return {
     api, navigate, back, forward, reload, stop, state, show, hide, bounds, close,
+    extractList, extractDetail,
     emit: (event) => {
       if (current.value) {
         current.value = {
@@ -356,5 +394,96 @@ describe('BrowserPanel（W5.6 安全浏览布局状态）', () => {
     // 卸载时清理布局记录
     unmount()
     expect(store.consume('browser-1')).toBeUndefined()
+  })
+})
+
+describe('BrowserPanel（W6 元素提取）', () => {
+  it('「提取元素」按钮：拉清单并渲染元素条目', async () => {
+    const fake = makeApi(makeState())
+    render(<BrowserPanel api={fake.api} descriptor={DESCRIPTOR} active onRequestClose={vi.fn()} />)
+
+    fireEvent.click(screen.getByTitle('提取元素'))
+
+    await waitFor(() => expect(fake.extractList).toHaveBeenCalledTimes(1))
+    expect(fake.extractList.mock.calls[0]?.[0]).toBe('browser-1')
+    expect(screen.getByText('提交（button）')).toBeTruthy()
+    expect(screen.getByText('文档（link）')).toBeTruthy()
+  })
+
+  it('点击元素条目：取详情并渲染详情卡片（标签/角色/名称/选择器/文本/属性）', async () => {
+    const fake = makeApi(makeState())
+    render(<BrowserPanel api={fake.api} descriptor={DESCRIPTOR} active onRequestClose={vi.fn()} />)
+
+    fireEvent.click(screen.getByTitle('提取元素'))
+    await waitFor(() => expect(screen.getByText('提交（button）')).toBeTruthy())
+
+    fireEvent.click(screen.getByText('提交（button）'))
+
+    await waitFor(() => expect(fake.extractDetail).toHaveBeenCalledTimes(1))
+    expect(fake.extractDetail.mock.calls[0]?.[0]).toBe('browser-1')
+    expect(fake.extractDetail.mock.calls[0]?.[1]).toEqual({ ref: 'el-1' })
+    await waitFor(() => expect(screen.getByText('html > body > button')).toBeTruthy())
+    expect(screen.getByText('提交表单')).toBeTruthy()
+    // 角色与属性值都是 'button'（详情卡片里出现多次）
+    expect(screen.getAllByText('button').length).toBeGreaterThan(0)
+  })
+
+  it('清单失败：呈现主进程给出的可展示文案，不渲染元素', async () => {
+    const fake = makeApi(makeState(), null, { list: { ok: false, elements: [], detail: '当前浏览器视图不支持元素提取' } })
+    render(<BrowserPanel api={fake.api} descriptor={DESCRIPTOR} active onRequestClose={vi.fn()} />)
+
+    fireEvent.click(screen.getByTitle('提取元素'))
+
+    await waitFor(() => expect(screen.getByText(/不支持元素提取/)).toBeTruthy())
+    expect(fake.extractDetail).not.toHaveBeenCalled()
+  })
+
+  it('清单为空：提示页面没有可提取元素', async () => {
+    const fake = makeApi(makeState(), null, { list: { ok: true, elements: [] } })
+    render(<BrowserPanel api={fake.api} descriptor={DESCRIPTOR} active onRequestClose={vi.fn()} />)
+
+    fireEvent.click(screen.getByTitle('提取元素'))
+
+    await waitFor(() => expect(screen.getByText(/没有可提取的元素/)).toBeTruthy())
+  })
+
+  it('详情失败：呈现主进程文案并清空详情卡片', async () => {
+    const fake = makeApi(makeState(), null, {
+      detail: { ok: false, detail: '提取详情引用无效或已过期，请重新列出元素' },
+    })
+    render(<BrowserPanel api={fake.api} descriptor={DESCRIPTOR} active onRequestClose={vi.fn()} />)
+
+    fireEvent.click(screen.getByTitle('提取元素'))
+    await waitFor(() => expect(screen.getByText('提交（button）')).toBeTruthy())
+    fireEvent.click(screen.getByText('提交（button）'))
+
+    await waitFor(() => expect(screen.getByText(/引用无效或已过期/)).toBeTruthy())
+    expect(screen.queryByText('html > body > button')).toBeNull()
+  })
+
+  it('元素截图存在时渲染截图', async () => {
+    const fake = makeApi(makeState(), null, {
+      detail: {
+        ok: true,
+        element: {
+          tagName: 'button',
+          role: 'button',
+          name: '提交',
+          selector: null,
+          path: [],
+          textSnippet: '',
+          attributes: {},
+          rect: null,
+          screenshot: { dataUrl: 'data:image/png;base64,AAAA', width: 10, height: 20 },
+        },
+      },
+    })
+    render(<BrowserPanel api={fake.api} descriptor={DESCRIPTOR} active onRequestClose={vi.fn()} />)
+
+    fireEvent.click(screen.getByTitle('提取元素'))
+    await waitFor(() => expect(screen.getByText('提交（button）')).toBeTruthy())
+    fireEvent.click(screen.getByText('提交（button）'))
+
+    await waitFor(() => expect(screen.getByAltText('元素截图')).toBeTruthy())
   })
 })

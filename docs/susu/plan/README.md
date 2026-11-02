@@ -28,6 +28,7 @@
 | 3 | W3 | 只读工作区成为右栏 Panel，文档进入中栏 | W1c | [W3 工作区](./phases/W3-workspace.md) |
 | 4 | W4 | 主进程 PTY terminal，共享工作区 cwd | W2、W3 | [W4 Terminal](./phases/W4-terminal.md) |
 | 5 | W5 | 独立 browser Surface 与安全导航、下载 | W4 | [W5 Browser](./phases/W5-browser.md) |
+| 5b | W6 | 浏览器元素提取（提取元素，纯 CDP 不执行页面脚本） | W5 | [W6 浏览器元素提取](./phases/W6-browser-extraction.md) |
 | r | R1 | 两套 Harness 收敛 + DSH 真实集成链（boot→wire→chat） | W2 | [R1 Harness 收敛](./phases/R1-harness.md) |
 | 6 | Q1 | 一句话生成经审计的本地项目快照 | W5 | [Q1 计划生成](./phases/Q1-plan.md) |
 | 7 | Q2 | project-canvas 成为给人看的项目中栏 Surface | Q1 | [Q2 项目看板](./phases/Q2-canvas.md) |
@@ -46,6 +47,7 @@ flowchart LR
   W3 --> W4
   W2 --> R1[R1 Harness收敛+集成链]
   W4 --> W5[W5 browser]
+  W5 --> W6[W6 元素提取]
   W5 --> Q1[Q1 快照]
   Q1 --> Q2[Q2 看板]
   R1 --> Q3[Q3 单任务执行]
@@ -72,6 +74,7 @@ flowchart LR
 | W2 / W3 | W2 **done（2026-10-29）**：7 卡全完成（T1 行为矩阵 → T2 sidecar 生命周期 → T3 CLI/接线收口 → T4 控制台生命周期 → T5 状态接入壳 → T6 隔离链路冒烟 → T7 全量回归与交接）；网关侧 A1–A8 收敛，Harness 差异移交 R1。总门禁 build/typecheck/test 全绿（desktop 79 + plugin 39 + service 8 + core 34 + sdk 9 + kernel 28 + theme 10 + workspace 5 + syntax 3 + canvas 4，基线只增不减），overlay 7/7，桌面冒烟 dev+便携各 12 截图全过，smoke:magpie 10/10（证据秘密扫描 0 命中）。Sprint 记录 docs/sprints/w2/ | [evidence/W2/](./evidence/W2/) |
 | W3 | **done**：只读工作区右栏化 + 中栏文档标签 + 共享 WorkspaceContext（经 issue #6 合入 main） | — |
 | W4 / W5 | W4 **done（2026-10-29）**：7 卡全部完成——PTY 技术 spike、terminal+process capability 契约（通用 handler registry）、主进程 TerminalService、renderer Terminal Surface、root 变更语义、受控 process:execute、安全便携与故障回收验收；Sprint 记录 docs/sprints/w4/。W5 **done（2026-10-30）**：W5.1 **done**——browser 契约与 provider 策略层（协议白名单/独立分区/capability/凭据拒绝）；W5.2 **done**——独立 WebContents 生命周期（多标签/切换不重载/关闭回收/崩溃隔离/挂 W1c registry + electron spike 12/12）；W5.3 **done**——导航与外链规则（地址栏面板、will-frame-navigate/will-redirect 逐跳守卫、重定向最终地址优先、错误页净化、window.open 交系统浏览器 + electron spike 20/20）；W5.4 **done**——默认拒绝敏感权限（权限策略纯模块 + 分区 session 全拒 handler + origin/类型脱敏记录 + 面板可诊断文案 + electron spike 23/23）；W5.5 **done**——受控下载（下载策略纯模块 + will-download 系统保存对话框确认路径 + 脱敏下载事件 + 关闭取消在途下载 + electron spike 34/34）；W5.6 **done**——安全浏览布局状态（布局策略纯模块 + 敏感 URL 拒绝入快照 + 版本不兼容安全回退 + 挂载消费恢复用户可见重导航，browser 76/76、desktop 100/100）；W5.7 **done**——端到端与便携验收（tools/smoke-browser.ts CDP 驱动真实宿主 + 本地受控 HTTP 站 23/23、红线断言无 executeJavaScript 进访客视图、补齐渲染壳浏览器页 BrowserPage、smoke-desktop W4 回归 OK、全量门禁绿）。Sprint 记录 docs/sprints/w5/ | [evidence/W4/](./evidence/W4/)、[evidence/W5/](./evidence/W5/) |
+| W6 | **done（2026-11-02）**：issue #11 提出的「优化浏览器效果 + 增加提取元素」落地。W6.0 研究——deepwiki.com/stablyai/orca 全量导出为 `docs/orca/`（58 页 + 索引），arch-diagram 分析见 `docs/orca/browser-module-analysis.md`（orca browser 五层骨架、两条提取路线时序、7 条安全设计、本仓现状图与路线对比）；结论：不抄 orca 的「注入 overlay 脚本」路线（与本仓「视图抽象不提供页面脚本执行通道」红线冲突），走**纯 CDP 只读域**。W6.1–W6.4 实现——提取策略纯模块（属性白名单 + 凭据脱敏 + URL 净化 + 长度预算 + **CDP 方法白名单不含 `Runtime.*`**）+ CDP 提取器（AX 清单 / DOM 详情 / 结构选择器 / 区域截图，操作前后临时 attach-detach）+ 服务层会话引用表（只认本会话最近一次清单的 ref，导航后作废）+ 两个窄通道 + 面板「提取元素」入口（元素清单 → 详情卡片）。W6.5 验收——smoke-browser 新增 `/elements` 靶场与 5 项断言（清单、详情含选择器、凭据属性脱敏、渲染壳无页面脚本执行通道、browser 窄通道无脚本执行入口），**28/28 全绿**；browser 110/110、desktop 132/132、全仓 typecheck 与 check:typescript 绿。附带修复两处观察到的既有缺陷：① 回到浏览器页时统一中栏槽活跃项可能是终端（浏览器页渲染出终端）→ 页面改为聚焦自己的最近一个 Surface；② smoke 断言硬编码检出目录名 → 改为只断言「已加载一个根目录」。**W6.6 追加**——browser 插件 IPC 契约（issue #11 追加要求「当前 plugin browser 需要考虑 ipc 接口需要定义一下，可能会连接不同的 plugin，或者 desktop version」）：契约归插件所有，`plugins/browser/src/shared/ipc.ts` 单一定义 8 个调用方法 + 1 个事件通道、方法签名、能力声明（`network:navigate`/`surface:read`/`element:extract`）与版本 `1.0`；宿主中立双侧接入面（主进程 `registerBrowserIpc(host, handlers)`、渲染侧 `createBrowserApi(transport)`），另有同进程直调与跨进程 RPC 两个适配器；版本协商 fail closed（major 不一致或宿主 minor 更低即拒绝注册，不降级到部分通道）；红线入契约（契约内无脚本执行通道，注册时与单测双重断言）。桌面新增 `main/browser-ipc.ts` 声明 `DESKTOP_BROWSER_IPC_VERSION` 并注册，`main/ipc.ts` 收编 8 条通道，`preload/index.ts` 改为由契约构造 BrowserApi。契约单测 18 + 处理器工厂 3 + 桌面接线 4；smoke-browser 29/29（含「渲染壳 browser 窄通道集合 = 契约方法集」一致性断言）；browser 131/131、desktop 136/136。契约文档 `docs/browser-plugin-ipc-contract.md`。Sprint 记录 docs/sprints/w6/ | [evidence/W6/](./evidence/W6/) |
 | R1 | 待执行 | — |
 | Q1 / Q2 / Q3 | 待执行 | — |
 
