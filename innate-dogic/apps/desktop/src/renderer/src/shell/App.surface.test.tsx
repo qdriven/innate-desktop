@@ -51,6 +51,9 @@ const apiMocks = vi.hoisted(() => ({
   revealDshHome: vi.fn(async () => ''),
   // W3：root 变更订阅（关闭旧 root 文档标签）
   workspaceOnRootChanged: vi.fn(() => () => {}),
+  // W6.8：主页展示并使用当前工作区 root
+  workspaceGetRoot: vi.fn(async (): Promise<{ path: string; name: string } | null> => null),
+  workspacePickRoot: vi.fn(async (): Promise<{ path: string; name: string } | null> => null),
 }))
 
 vi.mock('../api', () => ({ api: apiMocks }))

@@ -11,6 +11,7 @@ import type {
   StatusSnapshot,
 } from '@dogic/core'
 import type { SurfaceDescriptor } from '@dogic/core/surface'
+import type { WorkspaceContext } from '@dogic/plugin-workspace'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@innate/ui'
 import { api } from './api'
 import ConsolePage from './ConsolePage'
@@ -34,9 +35,12 @@ import {
   HARNESS_SURFACE_ID,
   MAGPIE_CONSOLE_PROVIDER_ID,
   MAGPIE_CONSOLE_SURFACE_ID,
+  browserSurface,
   harnessSurface,
   magpieConsoleSurface,
+  nextSurfaceIndex,
   surfacePageId,
+  terminalSurface,
 } from './surfaces/catalog'
 
 /** 中栏 Surface 标签快照的持久化键；快照只含安全字段。 */
@@ -53,6 +57,8 @@ export default function App({ rightPanel = true }: { rightPanel?: boolean }): JS
   const [harnessLoaded, setHarnessLoaded] = useState(false)
   const [launching, setLaunching] = useState(false)
   const [launchMsg, setLaunchMsg] = useState('')
+  /** 当前工作区 root（W6.8）：主页展示并在终端启动时使用。 */
+  const [workspaceRoot, setWorkspaceRoot] = useState<WorkspaceContext | null>(null)
 
   // 标签模型与 provider 注册表在整个壳生命周期内唯一；StrictMode 重挂载不影响语义。
   const tabsRef = useRef<SurfaceTabs | null>(null)
@@ -120,6 +126,13 @@ export default function App({ rightPanel = true }: { rightPanel?: boolean }): JS
   }, [])
 
   // 工作区 root 变化（W3.2）：关闭 workspaceId 与新 root 不一致的旧文档标签。
+  // W6.8：同时刷新主页展示的 root（主页是终端启动的入口）。
+  const refreshWorkspaceRoot = useCallback((): void => {
+    void api.workspaceGetRoot().then(setWorkspaceRoot).catch(() => setWorkspaceRoot(null))
+  }, [api])
+
+  useEffect(() => { refreshWorkspaceRoot() }, [refreshWorkspaceRoot])
+
   useEffect(() => {
     const unsubscribe = api.workspaceOnRootChanged((changed) => {
       for (const surface of tabs.list()) {
@@ -127,9 +140,10 @@ export default function App({ rightPanel = true }: { rightPanel?: boolean }): JS
           tabs.close(surface.id)
         }
       }
+      refreshWorkspaceRoot()
     })
     return unsubscribe
-  }, [api, tabs])
+  }, [api, tabs, refreshWorkspaceRoot])
 
   const launch = async (): Promise<void> => {
     setLaunching(true)
@@ -161,6 +175,33 @@ export default function App({ rightPanel = true }: { rightPanel?: boolean }): JS
     tabs.open(descriptor)
     tabs.activate(descriptor.id)
   }, [tabs])
+
+  /**
+   * 主页快捷入口（W6.8）：从主页一步打开终端/浏览器。
+   *
+   * 一次点击完成「建 Surface + 切到对应页面」——用户不必先在左栏找入口、
+   * 再在页面里点一次「新建」。标签 id 取不与既有标签冲突的序号（跨页面、
+   * 跨挂载唯一），避免重建同名标签导致「点了没反应」。
+   */
+  const openBrowserSurface = useCallback((): void => {
+    const index = nextSurfaceIndex('browser', tabs.list().map((surface) => surface.id))
+    const id = `browser-${index}`
+    tabs.open(browserSurface(id, index))
+    tabs.activate(id)
+    setTab('browser')
+  }, [tabs])
+
+  const openTerminalSurface = useCallback(async (): Promise<void> => {
+    let root = workspaceRoot ?? (await api.workspaceGetRoot())
+    if (!root) root = await api.workspacePickRoot()
+    if (!root) return
+    setWorkspaceRoot(root)
+    const index = nextSurfaceIndex('terminal', tabs.list().map((surface) => surface.id))
+    const id = `terminal-${index}`
+    tabs.open(terminalSurface(id, root.path, index))
+    tabs.activate(id)
+    setTab('terminal')
+  }, [tabs, workspaceRoot])
 
   const opener = useMemo<WorkspaceDocumentOpener>(() => ({
     openDocument,
@@ -252,6 +293,9 @@ export default function App({ rightPanel = true }: { rightPanel?: boolean }): JS
       onStop={() => void api.stopHarness()}
       onOpenSettings={() => setTab(mode === 'simple' ? 'settings' : 'console')}
       onLaunchMagpie={(detail) => setLaunchMsg(detail)}
+      onOpenTerminal={() => void openTerminalSurface()}
+      onOpenBrowser={openBrowserSurface}
+      workspaceRoot={workspaceRoot}
       wsActive={wsActive}
     />
   )
@@ -313,6 +357,11 @@ interface ContentBodyProps {
   onOpenSettings(): void
   /** 启动 magpie 的结果文案回写到 App 的 launchMsg（总览页展示）。 */
   onLaunchMagpie(detail: string): void
+  /** 主页快捷入口（W6.8）：一步打开终端/浏览器。 */
+  onOpenTerminal(): void
+  onOpenBrowser(): void
+  /** 当前工作区 root（主页展示；终端在其上启动）。 */
+  workspaceRoot: WorkspaceContext | null
   /** 当前激活项是 workspace-* provider（W3.4）：内容页据此决定渲染文档槽还是页面内容。 */
   wsActive: boolean
 }
@@ -336,6 +385,9 @@ function ContentBody({
   onStop,
   onOpenSettings,
   onLaunchMagpie,
+  onOpenTerminal,
+  onOpenBrowser,
+  workspaceRoot,
   wsActive,
 }: ContentBodyProps): JSX.Element {
   const contentSlot = (fallback: ReactNode): JSX.Element => (
@@ -392,8 +444,8 @@ function ContentBody({
       )}
       {activeTab === 'overview' && (
         wsActive
-          ? contentSlot(<OverviewContent status={status} harness={harness} launching={launching} launchMsg={launchMsg} onLaunch={onLaunch} onLaunchMagpie={onLaunchMagpie} />)
-          : <OverviewContent status={status} harness={harness} launching={launching} launchMsg={launchMsg} onLaunch={onLaunch} onLaunchMagpie={onLaunchMagpie} />
+          ? contentSlot(<OverviewContent status={status} harness={harness} launching={launching} launchMsg={launchMsg} onLaunch={onLaunch} onLaunchMagpie={onLaunchMagpie} onOpenTerminal={onOpenTerminal} onOpenBrowser={onOpenBrowser} workspaceRoot={workspaceRoot} />)
+          : <OverviewContent status={status} harness={harness} launching={launching} launchMsg={launchMsg} onLaunch={onLaunch} onLaunchMagpie={onLaunchMagpie} onOpenTerminal={onOpenTerminal} onOpenBrowser={onOpenBrowser} workspaceRoot={workspaceRoot} />
       )}
       {activeTab === 'models' && (wsActive ? contentSlot(<ModelsTab />) : <ModelsTab />)}
       {activeTab === 'console' && (
@@ -475,6 +527,9 @@ function OverviewContent({
   launchMsg,
   onLaunch,
   onLaunchMagpie,
+  onOpenTerminal,
+  onOpenBrowser,
+  workspaceRoot,
 }: {
   status: StatusSnapshot | null
   harness: HarnessState
@@ -482,6 +537,9 @@ function OverviewContent({
   launchMsg: string
   onLaunch(): void
   onLaunchMagpie(detail: string): void
+  onOpenTerminal(): void
+  onOpenBrowser(): void
+  workspaceRoot: WorkspaceContext | null
 }): JSX.Element {
   const gwOk = status?.gateway.running === true
   const wired = (status?.dsh.wiredFiles.length ?? 0) > 0
@@ -508,6 +566,20 @@ function OverviewContent({
           {harness.phase === 'running' && (
             <button onClick={() => void api.stopHarness()}>停止 Harness</button>
           )}
+        </div>
+      </section>
+
+      {/* W6.8：主页快捷入口——一步打开终端/浏览器（建 Surface + 切页）。 */}
+      <section className="quick-launch">
+        <div className="quick-launch-text">
+          <h2>快速打开</h2>
+          <p className="dim">
+            终端在当前工作区 {workspaceRoot ? `▣ ${workspaceRoot.name}` : '（未选择，将先弹出目录选择）'} 中启动；浏览器为受控浏览 Surface。
+          </p>
+        </div>
+        <div className="quick-launch-actions">
+          <button type="button" onClick={onOpenTerminal}>打开终端</button>
+          <button type="button" onClick={onOpenBrowser}>打开浏览器</button>
         </div>
       </section>
       {launchMsg && <p className="launch-msg">{launchMsg}</p>}

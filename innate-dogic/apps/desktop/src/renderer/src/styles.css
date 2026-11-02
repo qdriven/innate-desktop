@@ -169,6 +169,17 @@ button.small { padding: 3px 10px; font-size: var(--font-xs); border-radius: 5px;
 .table-head h2 { margin: 0; font-size: var(--font-title); }
 .main h2 { margin: 0 0 12px; font-size: var(--font-title); }
 
+/* W6.8：主页快捷入口（打开终端/浏览器）——一行卡片，右侧是两个浅底动作。 */
+.quick-launch {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 18px; margin-bottom: 12px;
+}
+.quick-launch h2 { margin: 0 0 4px; font-size: var(--font-title); }
+.quick-launch p { margin: 0; font-size: var(--font-xs); }
+.quick-launch-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.quick-launch-actions button { padding: 4px 12px; font-size: var(--font-xs); }
+
 table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 8px; overflow: hidden; }
 th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--border); }
 th { color: var(--dim); font-weight: 500; font-size: var(--font-2xs); text-transform: uppercase; letter-spacing: 0.05em; }

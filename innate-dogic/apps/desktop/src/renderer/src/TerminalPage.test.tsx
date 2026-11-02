@@ -123,6 +123,16 @@ function makeApi(overrides: Partial<TerminalApi> = {}): FakeTerminalApi {
 
 const REPO_ROOT: WorkspaceRoot = { path: 'C:/repo', name: 'repo' }
 
+/** 工具栏的「新建终端」按钮（空态里另有一个同名按钮，取第一个）。 */
+function newTerminalButton(): HTMLElement {
+  return screen.getAllByRole('button', { name: '新建终端' })[0] as HTMLElement
+}
+
+async function findNewTerminalButton(): Promise<HTMLElement> {
+  const buttons = await screen.findAllByRole('button', { name: '新建终端' })
+  return buttons[0] as HTMLElement
+}
+
 function makePage(root: WorkspaceRoot | null, fake: FakeTerminalApi) {
   innate.workspaceGetRoot.mockResolvedValue(root)
   innate.workspacePickRoot.mockResolvedValue(root)
@@ -153,18 +163,36 @@ afterEach(() => {
 })
 
 describe('TerminalPage（W4.4）', () => {
-  it('无 root：显示选择目录提示且「新建终端」禁用', async () => {
+  it('无 root：「新建终端」不是死按钮——点击进目录选择，取消则不建终端', async () => {
     const fake = makeApi()
     const parts = makePage(null, fake)
 
     render(<TerminalPage {...pageProps(parts)} />)
 
     expect(screen.getByText(/打开一个工作区后再使用终端/)).toBeTruthy()
-    expect(screen.getByRole('button', { name: '新建终端' }).getAttribute('disabled')).not.toBeNull()
-    // 选择目录后仍未创建终端，仅更新 root 状态
+    // W6.8：按钮不再是 disabled（原实现点击毫无反应）
+    expect(newTerminalButton().getAttribute('disabled')).toBeNull()
+    // 目录选择被取消 → 不建终端，也不报错
+    fireEvent.click(newTerminalButton())
+    await waitFor(() => expect(innate.workspacePickRoot).toHaveBeenCalled())
+    expect(fake.create).not.toHaveBeenCalled()
+    // 「选择目录」仍可单独使用：只更新 root 状态
     fireEvent.click(screen.getByRole('button', { name: '选择目录' }))
     await waitFor(() => expect(screen.getByText(/▣ repo|打开一个工作区后再使用终端/)).toBeTruthy())
     expect(fake.create).not.toHaveBeenCalled()
+  })
+
+  it('无 root：点击「新建终端」选定目录后立即建终端', async () => {
+    const fake = makeApi()
+    const parts = makePage(null, fake)
+    innate.workspacePickRoot.mockResolvedValue(REPO_ROOT)
+
+    render(<TerminalPage {...pageProps(parts)} />)
+    fireEvent.click(newTerminalButton())
+
+    await waitFor(() => expect(fake.create).toHaveBeenCalledTimes(1))
+    const descriptor = fake.create.mock.calls[0]?.[0] as TerminalDescriptor
+    expect(descriptor).toMatchObject({ id: 'terminal-1-s1', title: '终端 1', workspaceId: 'C:/repo' })
   })
 
   it('有 root：新建终端派生 terminal-N 标签并渲染面板', async () => {
@@ -172,7 +200,7 @@ describe('TerminalPage（W4.4）', () => {
     const parts = makePage(REPO_ROOT, fake)
 
     render(<TerminalPage {...pageProps(parts)} />)
-    const newButton = await screen.findByRole('button', { name: '新建终端' })
+    const newButton = await findNewTerminalButton()
     expect(newButton.getAttribute('disabled')).toBeNull()
     expect(screen.getByText(/▣ repo/)).toBeTruthy()
 
@@ -186,12 +214,34 @@ describe('TerminalPage（W4.4）', () => {
     expect(screen.getByRole('button', { name: '清屏' })).toBeTruthy()
   })
 
+  it('W6.8：页面重挂后再新建终端得到新标签（id 不撞既有标签）', async () => {
+    const fake = makeApi()
+    const parts = makePage(REPO_ROOT, fake)
+
+    const first = render(<TerminalPage {...pageProps(parts)} />)
+    fireEvent.click(await findNewTerminalButton())
+    await waitFor(() => expect(fake.create).toHaveBeenCalledTimes(1))
+
+    // 页面卸载再挂载（页内计数器归零的复现场景）
+    first.unmount()
+    render(<TerminalPage {...pageProps(parts)} />)
+    fireEvent.click(await findNewTerminalButton())
+
+    // 第二个终端必须是新标签 + 新会话，而不是复用 terminal-1
+    await waitFor(() => expect(fake.create).toHaveBeenCalledTimes(2))
+    const second = fake.create.mock.calls[1]?.[0] as TerminalDescriptor
+    expect(second.id).toBe('terminal-2-s2')
+    expect(second.title).toBe('终端 2')
+    expect(screen.getByRole('tab', { name: '终端 1' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: '终端 2' })).toBeTruthy()
+  })
+
   it('会话退出：显示退出提示与重开动作，重开关闭旧 PTY 并派生新 id', async () => {
     const fake = makeApi()
     const parts = makePage(REPO_ROOT, fake)
 
     render(<TerminalPage {...pageProps(parts)} />)
-    fireEvent.click(await screen.findByRole('button', { name: '新建终端' }))
+    fireEvent.click(await findNewTerminalButton())
     await waitFor(() => expect(fake.create).toHaveBeenCalledTimes(1))
 
     fake.emit({ terminalId: 'terminal-1-s1', exitCode: 0 })
@@ -212,7 +262,7 @@ describe('TerminalPage（W4.4）', () => {
     const parts = makePage(REPO_ROOT, fake)
 
     render(<TerminalPage {...pageProps(parts)} />)
-    const newButton = await screen.findByRole('button', { name: '新建终端' })
+    const newButton = await findNewTerminalButton()
     fireEvent.click(newButton)
     fireEvent.click(newButton)
     await waitFor(() => expect(fake.create).toHaveBeenCalledTimes(2))
@@ -238,7 +288,7 @@ describe('TerminalPage（W4.4）', () => {
     const parts = makePage(REPO_ROOT, fake)
 
     render(<TerminalPage {...pageProps(parts)} />)
-    fireEvent.click(await screen.findByRole('button', { name: '新建终端' }))
+    fireEvent.click(await findNewTerminalButton())
 
     await waitFor(() => expect(screen.getByText(/终端创建失败/)).toBeTruthy())
     expect(screen.getByText(/未选择工作区目录/)).toBeTruthy()
@@ -250,7 +300,7 @@ describe('TerminalPage（W4.4）', () => {
     const parts = makePage(REPO_ROOT, fake)
 
     const { unmount } = render(<TerminalPage {...pageProps(parts)} />)
-    fireEvent.click(await screen.findByRole('button', { name: '新建终端' }))
+    fireEvent.click(await findNewTerminalButton())
     await waitFor(() => expect(fake.create).toHaveBeenCalledTimes(1))
 
     unmount()
@@ -266,7 +316,7 @@ describe('TerminalPage（W4.4）', () => {
     const parts = makePage(REPO_ROOT, fake)
 
     render(<TerminalPage {...pageProps(parts)} />)
-    fireEvent.click(await screen.findByRole('button', { name: '新建终端' }))
+    fireEvent.click(await findNewTerminalButton())
     await waitFor(() => expect(fake.create).toHaveBeenCalledTimes(1))
 
     // xterm onData 回调（面板已订阅）→ terminalInput

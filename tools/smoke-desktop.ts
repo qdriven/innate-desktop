@@ -349,8 +349,9 @@ try {
       const r = button.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]
     })
   }))()`)
+  // W6.7：窗口控件收小到 32×28（用户要求「按钮变小、黑色变浅」）。
   if (!titlebar?.tabs || !titlebar.statusEmpty || !titlebar.rightPanelSlot || !titlebar.noPill ||
-      titlebar.controlSizes.length !== 3 || titlebar.controlSizes.some(([w, h]) => w !== 46 || h !== 36)) {
+      titlebar.controlSizes.length !== 3 || titlebar.controlSizes.some(([w, h]) => w !== 32 || h !== 28)) {
     throw new Error(`TitlebarStrip 三区/空槽/窗口控件尺寸不符合契约: ${JSON.stringify(titlebar)}`)
   }
   await evaluate('document.querySelector(\'[aria-label="最大化"]\')?.click()')

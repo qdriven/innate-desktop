@@ -149,6 +149,40 @@ Agent 使用，同时**不放宽** W5 立下的红线（无 `executeJavaScript`�
   真实窗口截图确认地址栏、提取面板与页面三者同时可见。
 - **完成标准**：新建浏览器后地址栏立即可见可用；按钮尺度与壳内其它控件一致。
 
+## W6.8 入口可发现性与标签 id 唯一性（「打开不开 browser/terminal」收口）
+
+- **改动位置**：`apps/desktop/src/renderer/src/surfaces/catalog.ts`、
+  `apps/desktop/src/renderer/src/TerminalPage.tsx`、
+  `apps/desktop/src/renderer/src/BrowserPage.tsx`、
+  `apps/desktop/src/renderer/src/App.tsx`、
+  `apps/desktop/src/renderer/src/styles.css`、
+  `tools/smoke-desktop.ts`；测试 `TerminalPage.test.tsx`、
+  `BrowserPage.test.tsx`（新增）、`shell/App.shell.test.tsx`、
+  `shell/App.surface.test.tsx`。
+- **来源**：issue #11 追加反馈——「不能打开 browser 和 terminal」。
+- **根因（真缺陷）**：`新建终端/新建浏览器` 的标签 id 由页内计数器派生
+  （`terminal-N`/`browser-N`），而页面随导航卸载重挂、应用重启后从标签
+  快照恢复——计数器归零后再次「新建」必命中既有 id；`SurfaceRegistry.open`
+  对同 provider 同 kind 的重号**静默覆盖**（不报错、不新增标签、不起新会话），
+  用户看到的就是「点了没反应」。
+- **实施**：
+  1. **id 派生改为「最小可用序号」**：`nextSurfaceIndex(prefix, existingIds)`
+     按既有标签集合取空位，跨页面、跨挂载、跨启动都唯一；终端页、浏览器页、
+     主页快捷入口三处共用。
+  2. **无 root 时「新建终端」不再是死按钮**：原先 `disabled`，用户眼里同样
+     是「点了没反应」；改为点击直接弹目录选择，选定即建终端，取消则不动。
+  3. **入口可发现性**：主页（总览）新增「快速打开」卡片——一步完成
+     「建 Surface + 切到对应页面」；终端/浏览器页空态正中给出同样的入口，
+     不再只靠工具栏一行小按钮。
+  4. **可核查性**：真实窗口截图（主页快捷入口 / 终端新建 / 浏览器新建）到
+     `docs/susu/plan/evidence/W6/live/`；smoke 窗口控件断言同步 W6.7 的
+     32×28 尺度。
+- **验证**：单元测试 desktop 145/145、typecheck 通过；真实应用重启回归——
+  先建 `终端 1 + 浏览器 1` 再重启（快照恢复），新建得到 `终端 2`（新 PTY、
+  可交互）与 `浏览器 2`（地址栏面板与原生视图就位），无重号合并。
+- **完成标准**：任何时刻「新建终端/新建浏览器」都产生新标签与新会话；
+  主页一步可达终端/浏览器。
+
 ## 阶段回退
 
 移除 browser 的两个提取窄通道与面板入口即可回到 W5 基线；
